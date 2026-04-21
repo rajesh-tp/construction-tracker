@@ -1,0 +1,26 @@
+app = 'construction-tracker'
+primary_region = 'bom'
+
+[build]
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+
+[env]
+  DATABASE_URL = '/data/construction.db'
+  RECEIPTS_DIR = '/data/receipts'
+  NODE_ENV = 'production'
+
+[mounts]
+  source = 'construction_data'
+  destination = '/data'
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
+  memory_mb = 1024
