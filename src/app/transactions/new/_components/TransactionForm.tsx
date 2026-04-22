@@ -3,8 +3,11 @@
 import { useActionState, useEffect, useRef, useState } from "react";
 import { createTransaction, type ActionState } from "@/lib/actions";
 import { TRANSACTION_CATEGORIES, TRANSACTION_TYPES } from "@/lib/validators";
+import { serializeReceiptPaths } from "@/lib/receipts";
 import { toast } from "sonner";
 import type { Account } from "@/db/schema";
+
+type Receipt = { path: string; name: string };
 
 const initialState: ActionState = { status: "idle", message: "" };
 
@@ -18,9 +21,9 @@ export function TransactionForm({ accounts, defaultAccountId }: TransactionFormP
   const formRef = useRef<HTMLFormElement>(null);
   const [selectedAccountId, setSelectedAccountId] = useState<number | undefined>(defaultAccountId);
   const [selectedType, setSelectedType] = useState<string>("");
-  const [receiptPath, setReceiptPath] = useState<string>("");
-  const [receiptName, setReceiptName] = useState<string>("");
+  const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const selectedAccount = accounts.find((a) => a.id === selectedAccountId);
   const isDoubleEntry = selectedType === "payment" && selectedAccount?.accountType === "contractor";
@@ -29,8 +32,7 @@ export function TransactionForm({ accounts, defaultAccountId }: TransactionFormP
     if (state.status === "success") {
       toast.success(state.message);
       formRef.current?.reset();
-      setReceiptPath("");
-      setReceiptName("");
+      setReceipts([]);
       setSelectedType("");
     } else if (state.status === "error") {
       toast.error(state.message);
@@ -40,47 +42,39 @@ export function TransactionForm({ accounts, defaultAccountId }: TransactionFormP
   const today = new Date().toISOString().split("T")[0];
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error("File too large (max 5MB)");
-      e.target.value = "";
-      return;
-    }
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
 
     setUploading(true);
     try {
-      const formData = new FormData();
-      formData.append("receipt", file);
-      const res = await fetch("/api/receipts/upload", { method: "POST", body: formData });
-      const data = await res.json();
-
-      if (!res.ok) {
-        toast.error(data.error || "Upload failed");
-        e.target.value = "";
-        return;
+      for (const file of files) {
+        if (file.size > 5 * 1024 * 1024) {
+          toast.error(`${file.name}: too large (max 5MB)`);
+          continue;
+        }
+        const formData = new FormData();
+        formData.append("receipt", file);
+        const res = await fetch("/api/receipts/upload", { method: "POST", body: formData });
+        const data = await res.json();
+        if (!res.ok) {
+          toast.error(`${file.name}: ${data.error || "upload failed"}`);
+          continue;
+        }
+        setReceipts((prev) => [...prev, { path: data.filename, name: file.name }]);
       }
-
-      setReceiptPath(data.filename);
-      setReceiptName(file.name);
-      toast.success("Receipt uploaded");
-    } catch {
-      toast.error("Upload failed");
-      e.target.value = "";
     } finally {
       setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
 
-  function removeReceipt() {
-    setReceiptPath("");
-    setReceiptName("");
+  function removeReceipt(path: string) {
+    setReceipts((prev) => prev.filter((r) => r.path !== path));
   }
 
   return (
     <form ref={formRef} action={formAction} className="space-y-4">
-      <input type="hidden" name="receiptPath" value={receiptPath} />
+      <input type="hidden" name="receiptPath" value={serializeReceiptPaths(receipts.map((r) => r.path)) || ""} />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
@@ -231,36 +225,41 @@ export function TransactionForm({ accounts, defaultAccountId }: TransactionFormP
       {/* Receipt Upload */}
       <div>
         <label className="mb-1.5 block text-sm font-medium text-text-secondary">
-          Receipt / Attachment (optional)
+          Receipts / Attachments (optional)
         </label>
-        {receiptPath ? (
-          <div className="flex items-center gap-3 rounded-lg border border-border bg-surface-alt px-4 py-2.5">
-            <svg className="h-5 w-5 shrink-0 text-accent-green" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <span className="flex-1 truncate text-sm text-text-primary">{receiptName}</span>
-            <button
-              type="button"
-              onClick={removeReceipt}
-              className="text-xs text-accent-red hover:underline"
-            >
-              Remove
-            </button>
-          </div>
-        ) : (
-          <input
-            type="file"
-            id="receipt"
-            accept="image/jpeg,image/png,image/webp,application/pdf"
-            onChange={handleFileChange}
-            disabled={uploading}
-            className="w-full rounded-lg border border-border-strong px-4 py-2 text-sm text-text-heading file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1 file:text-sm file:text-white file:cursor-pointer"
-          />
+        {receipts.length > 0 && (
+          <ul className="mb-2 space-y-2">
+            {receipts.map((r) => (
+              <li key={r.path} className="flex items-center gap-3 rounded-lg border border-border bg-surface-alt px-4 py-2.5">
+                <svg className="h-5 w-5 shrink-0 text-accent-green" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span className="flex-1 truncate text-sm text-text-primary">{r.name}</span>
+                <button
+                  type="button"
+                  onClick={() => removeReceipt(r.path)}
+                  className="text-xs text-accent-red hover:underline"
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
         )}
+        <input
+          ref={fileInputRef}
+          type="file"
+          id="receipt"
+          accept="image/jpeg,image/png,image/webp,application/pdf"
+          multiple
+          onChange={handleFileChange}
+          disabled={uploading}
+          className="w-full rounded-lg border border-border-strong px-4 py-2 text-sm text-text-heading file:mr-3 file:rounded-md file:border-0 file:bg-primary file:px-3 file:py-1 file:text-sm file:text-white file:cursor-pointer"
+        />
         {uploading && (
           <p className="mt-1 text-xs text-text-muted">Uploading...</p>
         )}
-        <p className="mt-1 text-xs text-text-faint">JPG, PNG, WebP, or PDF. Max 5MB.</p>
+        <p className="mt-1 text-xs text-text-faint">JPG, PNG, WebP, or PDF. Max 5MB each. Select multiple files at once.</p>
       </div>
 
       <div className="flex justify-end">

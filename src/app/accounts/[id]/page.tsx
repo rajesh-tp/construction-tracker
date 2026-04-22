@@ -1,5 +1,6 @@
 import { requireAuth, getActiveConstructionId } from "@/lib/auth";
 import { getAccountById, getTransactionsByAccountId, getConstructionOwnerName } from "@/lib/queries";
+import { parseReceiptPaths } from "@/lib/receipts";
 import { SummaryCard } from "@/components/SummaryCard";
 import { notFound } from "next/navigation";
 import Link from "next/link";
@@ -160,10 +161,11 @@ export default async function AccountDetailPage({
                       </span>
                     </div>
                   </div>
-                  <div className="mt-2 flex items-center gap-3 text-xs">
-                    {txn.receiptPath && (
+                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                    {parseReceiptPaths(txn.receiptPath).map((path, i, arr) => (
                       <a
-                        href={`/api/receipts/${txn.receiptPath}`}
+                        key={path}
+                        href={`/api/receipts/${path}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-1 text-primary hover:underline"
@@ -171,9 +173,9 @@ export default async function AccountDetailPage({
                         <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
                         </svg>
-                        Receipt
+                        {arr.length > 1 ? `Receipt ${i + 1}` : "Receipt"}
                       </a>
-                    )}
+                    ))}
                     {txn.createdByName && (
                       <span className="text-text-faint">by {txn.createdByName}</span>
                     )}
@@ -240,21 +242,28 @@ export default async function AccountDetailPage({
                         {formatCurrency(txn.amount)}
                       </td>
                       <td className="py-2.5">
-                        {txn.receiptPath ? (
-                          <a
-                            href={`/api/receipts/${txn.receiptPath}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
-                          >
-                            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                            </svg>
-                            View
-                          </a>
-                        ) : (
-                          <span className="text-xs text-text-faint">—</span>
-                        )}
+                        {(() => {
+                          const paths = parseReceiptPaths(txn.receiptPath);
+                          if (paths.length === 0) return <span className="text-xs text-text-faint">—</span>;
+                          return (
+                            <div className="flex flex-col gap-0.5">
+                              {paths.map((path, i) => (
+                                <a
+                                  key={path}
+                                  href={`/api/receipts/${path}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                                >
+                                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                                  </svg>
+                                  {paths.length > 1 ? `View ${i + 1}` : "View"}
+                                </a>
+                              ))}
+                            </div>
+                          );
+                        })()}
                       </td>
                       <td className="py-2.5 text-xs text-text-faint">
                         {txn.createdByName || "—"}
