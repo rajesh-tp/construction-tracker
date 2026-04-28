@@ -2,11 +2,11 @@
 
 import { db } from "@/lib/db";
 import { users, contractors, accounts, transactions, constructions, userConstructions, workers, attendance } from "@/db/schema";
-import { contractorSchema, transactionSchema, loginSchema, accountBalanceSchema, profileSchema, constructionSchema, userManageSchema, workerSchema, attendanceSchema, bulkAttendanceSchema } from "@/lib/validators";
+import { contractorSchema, transactionSchema, loginSchema, accountBalanceSchema, profileSchema, constructionSchema, userManageSchema, workerSchema, attendanceSchema, bulkAttendanceSchema, wagePaymentSchema } from "@/lib/validators";
 import { revalidatePath } from "next/cache";
 import { createSession, deleteSession, requireOwner, requireSuperAdmin, getActiveConstructionId, requireConstructionAccess, getSessionPayload } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, inArray } from "drizzle-orm";
 import crypto from "crypto";
 
 export type ActionState = {
@@ -724,6 +724,12 @@ export async function deleteTransaction(id: number): Promise<ActionState> {
     }
   }
 
+  // Clear payment stamps on any attendance rows tied to this transaction (wage payments)
+  db.update(attendance)
+    .set({ paymentTransactionId: null })
+    .where(eq(attendance.paymentTransactionId, id))
+    .run();
+
   // Delete the transaction
   db.delete(transactions).where(eq(transactions.id, id)).run();
 
@@ -734,6 +740,7 @@ export async function deleteTransaction(id: number): Promise<ActionState> {
 
   revalidatePath("/");
   revalidatePath("/transactions");
+  revalidatePath("/workers");
 
   return { status: "success", message: "Transaction deleted.", timestamp: Date.now() };
 }
@@ -1449,6 +1456,14 @@ export async function deleteAttendance(attendanceId: number): Promise<ActionStat
     return { status: "error", message: "Attendance entry not found.", timestamp: Date.now() };
   }
 
+  if (row.paymentTransactionId) {
+    return {
+      status: "error",
+      message: "This attendance has already been paid. Delete the wage payment first to unlock it.",
+      timestamp: Date.now(),
+    };
+  }
+
   db.delete(attendance).where(eq(attendance.id, attendanceId)).run();
 
   revalidatePath(`/workers/${row.workerId}`);
@@ -1457,6 +1472,193 @@ export async function deleteAttendance(attendanceId: number): Promise<ActionStat
   return {
     status: "success",
     message: "Attendance removed.",
+    timestamp: Date.now(),
+  };
+}
+
+// ── Wage Payments ───────────────────────────────────────────────────
+
+export async function payContractorWages(
+  prevState: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  await requireOwner();
+  const constructionId = await getActiveConstructionId();
+  const session = await getSessionPayload();
+
+  const idsRaw = formData.get("attendanceIds");
+  let ids: unknown;
+  try {
+    ids = idsRaw ? JSON.parse(String(idsRaw)) : [];
+  } catch {
+    return { status: "error", message: "Invalid attendance selection.", timestamp: Date.now() };
+  }
+
+  const parsed = wagePaymentSchema.safeParse({
+    contractorId: formData.get("contractorId"),
+    date: formData.get("date"),
+    attendanceIds: ids,
+    notes: formData.get("notes") ?? "",
+  });
+
+  if (!parsed.success) {
+    return {
+      status: "error",
+      message: "Validation failed.",
+      errors: parseFormErrors(parsed.error),
+      timestamp: Date.now(),
+    };
+  }
+
+  // Verify contractor in active construction and fetch its account
+  const contractor = db
+    .select()
+    .from(contractors)
+    .where(and(eq(contractors.id, parsed.data.contractorId), eq(contractors.constructionId, constructionId)))
+    .get();
+
+  if (!contractor) {
+    return { status: "error", message: "Contractor not found.", timestamp: Date.now() };
+  }
+
+  const contractorAccount = db
+    .select()
+    .from(accounts)
+    .where(
+      and(
+        eq(accounts.contractorId, contractor.id),
+        eq(accounts.constructionId, constructionId),
+        eq(accounts.accountType, "contractor")
+      )
+    )
+    .get();
+
+  if (!contractorAccount) {
+    return {
+      status: "error",
+      message: "Contractor's account not found.",
+      timestamp: Date.now(),
+    };
+  }
+
+  const primaryAccount = db
+    .select()
+    .from(accounts)
+    .where(and(eq(accounts.accountType, "primary"), eq(accounts.constructionId, constructionId)))
+    .get();
+
+  // Fetch the selected attendance rows; verify scope and unpaid status
+  const rows = db
+    .select({
+      id: attendance.id,
+      workerId: attendance.workerId,
+      date: attendance.date,
+      units: attendance.units,
+      wageSnapshot: attendance.wageSnapshot,
+      paymentTransactionId: attendance.paymentTransactionId,
+      constructionId: attendance.constructionId,
+      contractorId: workers.contractorId,
+    })
+    .from(attendance)
+    .innerJoin(workers, eq(workers.id, attendance.workerId))
+    .where(inArray(attendance.id, parsed.data.attendanceIds))
+    .all();
+
+  if (rows.length !== parsed.data.attendanceIds.length) {
+    return { status: "error", message: "Some attendance entries are missing.", timestamp: Date.now() };
+  }
+
+  for (const r of rows) {
+    if (r.constructionId !== constructionId) {
+      return { status: "error", message: "Attendance from another construction.", timestamp: Date.now() };
+    }
+    if (r.contractorId !== contractor.id) {
+      return { status: "error", message: "Selected entries belong to a different contractor.", timestamp: Date.now() };
+    }
+    if (r.paymentTransactionId !== null) {
+      return { status: "error", message: "Some entries are already paid.", timestamp: Date.now() };
+    }
+  }
+
+  const totalAmount = rows.reduce((sum, r) => sum + r.units * r.wageSnapshot, 0);
+  if (totalAmount <= 0) {
+    return { status: "error", message: "Total wage is zero — nothing to pay.", timestamp: Date.now() };
+  }
+
+  const uniqueWorkers = new Set(rows.map((r) => r.workerId)).size;
+  const description = `Wages: ${rows.length} day(s) across ${uniqueWorkers} worker(s)`;
+
+  // Insert the contractor-side payment transaction
+  const inserted = db
+    .insert(transactions)
+    .values({
+      constructionId,
+      accountId: contractorAccount.id,
+      contractorId: contractor.id,
+      date: parsed.data.date,
+      description,
+      amount: totalAmount,
+      type: "payment",
+      category: "Labour Payment",
+      notes: parsed.data.notes || null,
+      createdBy: session?.userId ?? null,
+    })
+    .returning({ id: transactions.id })
+    .get();
+
+  if (!inserted) {
+    return { status: "error", message: "Failed to record payment.", timestamp: Date.now() };
+  }
+
+  // Update contractor account balance
+  db.update(accounts)
+    .set({ currentBalance: contractorAccount.currentBalance + totalAmount })
+    .where(eq(accounts.id, contractorAccount.id))
+    .run();
+
+  // Double-entry: deduct from owner's primary account
+  if (primaryAccount) {
+    db.insert(transactions)
+      .values({
+        constructionId,
+        accountId: primaryAccount.id,
+        contractorId: contractor.id,
+        date: parsed.data.date,
+        description: `Payment to ${contractor.name}`,
+        amount: totalAmount,
+        type: "expense",
+        category: "Labour Payment",
+        notes: parsed.data.notes || null,
+        createdBy: session?.userId ?? null,
+      })
+      .run();
+
+    db.update(accounts)
+      .set({ currentBalance: primaryAccount.currentBalance - totalAmount })
+      .where(eq(accounts.id, primaryAccount.id))
+      .run();
+
+    revalidatePath(`/accounts/${primaryAccount.id}`);
+  }
+
+  // Stamp attendance rows with the new transaction id
+  db.update(attendance)
+    .set({ paymentTransactionId: inserted.id })
+    .where(inArray(attendance.id, parsed.data.attendanceIds))
+    .run();
+
+  revalidatePath("/");
+  revalidatePath("/transactions");
+  revalidatePath("/workers");
+  revalidatePath("/workers/pay");
+  revalidatePath(`/accounts/${contractorAccount.id}`);
+  for (const workerId of new Set(rows.map((r) => r.workerId))) {
+    revalidatePath(`/workers/${workerId}`);
+  }
+
+  return {
+    status: "success",
+    message: `Wage payment of ₹${totalAmount.toFixed(0)} recorded for ${contractor.name}.`,
     timestamp: Date.now(),
   };
 }

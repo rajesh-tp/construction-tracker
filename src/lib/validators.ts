@@ -116,6 +116,13 @@ export const bulkAttendanceSchema = z.object({
   entries: z.array(bulkAttendanceEntrySchema),
 });
 
+export const wagePaymentSchema = z.object({
+  contractorId: z.coerce.number().int().positive("Contractor is required"),
+  date: z.string().min(1, "Date is required"),
+  attendanceIds: z.array(z.coerce.number().int().positive()).min(1, "Select at least one attendance entry"),
+  notes: z.string().max(500).optional().default(""),
+});
+
 export const profileSchema = z.object({
   name: z.string().min(1, "Name is required").max(100),
   email: z.string().email("Valid email is required"),

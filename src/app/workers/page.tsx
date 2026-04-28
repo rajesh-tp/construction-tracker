@@ -14,17 +14,25 @@ export default async function WorkersPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-text-heading">Workers</h1>
           <p className="text-sm text-text-muted">Daily-wage workers under each labour contract</p>
         </div>
-        <Link
-          href="/workers/attendance"
-          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primary-hover"
-        >
-          Mark Attendance
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href="/workers/pay"
+            className="rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium text-text-heading transition-colors hover:bg-surface-alt"
+          >
+            Pay Wages
+          </Link>
+          <Link
+            href="/workers/attendance"
+            className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primary-hover"
+          >
+            Mark Attendance
+          </Link>
+        </div>
       </div>
 
       <div className="rounded-xl border border-border bg-surface p-5 shadow-sm">

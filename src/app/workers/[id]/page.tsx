@@ -4,6 +4,7 @@ import {
   getAllContractors,
   getAttendanceForWorkerInRange,
   getWorkerWageSummary,
+  getWagePaymentsForWorker,
 } from "@/lib/queries";
 import { notFound } from "next/navigation";
 import Link from "next/link";
@@ -57,9 +58,11 @@ export default async function WorkerDetailPage({
 
   const entriesMap = new Map<string, number>();
   const idMap = new Map<string, number>();
+  const paidDates = new Set<string>();
   for (const d of monthDays) {
     entriesMap.set(d.date, d.units);
     idMap.set(d.date, d.id);
+    if (d.paymentTransactionId !== null) paidDates.add(d.date);
   }
 
   // Wage summaries: this week, this month
@@ -73,6 +76,12 @@ export default async function WorkerDetailPage({
   weekEnd.setDate(weekStart.getDate() + 6);
   const weekEndStr = `${weekEnd.getFullYear()}-${pad(weekEnd.getMonth() + 1)}-${pad(weekEnd.getDate())}`;
   const weekSummary = await getWorkerWageSummary(worker.id, weekStartStr, weekEndStr);
+
+  // All-time wage payment history for this worker
+  const paymentHistory = await getWagePaymentsForWorker(worker.id);
+  const allTimeStart = "1970-01-01";
+  const allTimeEnd = "2999-12-31";
+  const allTimeSummary = await getWorkerWageSummary(worker.id, allTimeStart, allTimeEnd);
 
   const selectedUnits = entriesMap.get(selectedDate);
   const selectedAttendanceId = idMap.get(selectedDate);
@@ -94,7 +103,7 @@ export default async function WorkerDetailPage({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <SummaryCard
           title="This Week's Wage"
           value={formatCurrency(weekSummary.totalWage)}
@@ -118,20 +127,31 @@ export default async function WorkerDetailPage({
           }
         />
         <SummaryCard
-          title="Daily Wage"
-          value={formatCurrency(worker.dailyWage)}
-          subtitle="Current rate"
-          variant="amber"
+          title="Total Paid"
+          value={formatCurrency(allTimeSummary.paidWage)}
+          subtitle={`of ${formatCurrency(allTimeSummary.totalWage)} earned`}
+          variant="green"
           icon={
-            <svg className="h-5 w-5 text-accent-amber" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            <svg className="h-5 w-5 text-accent-green" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          }
+        />
+        <SummaryCard
+          title="Outstanding"
+          value={formatCurrency(allTimeSummary.unpaidWage)}
+          subtitle="Unpaid wages"
+          variant={allTimeSummary.unpaidWage > 0 ? "red" : "default"}
+          icon={
+            <svg className="h-5 w-5 text-accent-red" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           }
         />
       </div>
 
       <div className="rounded-xl border border-border bg-surface p-5 shadow-sm">
-        <MonthCalendar workerId={worker.id} year={year} month={month} entries={entriesMap} />
+        <MonthCalendar workerId={worker.id} year={year} month={month} entries={entriesMap} paidDates={paidDates} />
       </div>
 
       <div className="rounded-xl border border-border bg-surface p-5 shadow-sm">
@@ -143,6 +163,32 @@ export default async function WorkerDetailPage({
           defaultWage={worker.dailyWage}
           attendanceId={selectedAttendanceId}
         />
+      </div>
+
+      <div className="rounded-xl border border-border bg-surface p-5 shadow-sm">
+        <h2 className="mb-3 text-lg font-semibold text-text-heading">Payment History</h2>
+        {paymentHistory.length === 0 ? (
+          <p className="text-sm text-text-muted">No payments recorded yet.</p>
+        ) : (
+          <ul className="space-y-2">
+            {paymentHistory.map((p) => (
+              <li
+                key={p.transactionId}
+                className="flex items-center justify-between rounded-lg border border-border/50 p-3 text-sm"
+              >
+                <div>
+                  <p className="font-medium text-text-primary">{p.date}</p>
+                  <p className="text-xs text-text-muted">
+                    {p.description} &middot; {p.attendanceCount} day(s)
+                  </p>
+                </div>
+                <span className="font-semibold text-accent-green">
+                  {formatCurrency(p.workerWage)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       <div className="rounded-xl border border-border bg-surface p-5 shadow-sm">

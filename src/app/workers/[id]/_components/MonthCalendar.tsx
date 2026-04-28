@@ -28,11 +28,13 @@ export function MonthCalendar({
   year,
   month,
   entries,
+  paidDates,
 }: {
   workerId: number;
   year: number;
   month: number; // 1-12
   entries: Map<string, number>;
+  paidDates?: Set<string>;
 }) {
   const firstOfMonth = new Date(year, month - 1, 1);
   const daysInMonth = new Date(year, month, 0).getDate();
@@ -84,15 +86,22 @@ export function MonthCalendar({
           }
           const dateStr = `${year}-${pad(month)}-${pad(day)}`;
           const units = entries.get(dateStr);
+          const isPaid = paidDates?.has(dateStr) ?? false;
           return (
             <Link
               key={i}
               href={`/workers/${workerId}?year=${year}&month=${month}&date=${dateStr}#editor`}
-              className={`aspect-square rounded-md flex flex-col items-center justify-center border border-border/50 transition-colors ${unitsClass(units)}`}
+              className={`relative aspect-square rounded-md flex flex-col items-center justify-center border border-border/50 transition-colors ${unitsClass(units)}`}
             >
               <span className="text-xs">{day}</span>
               {units !== undefined && (
                 <span className="text-[10px] font-semibold">{unitsLabel(units)}</span>
+              )}
+              {isPaid && (
+                <span
+                  className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-accent-green"
+                  title="Paid"
+                />
               )}
             </Link>
           );
@@ -111,6 +120,9 @@ export function MonthCalendar({
         </span>
         <span className="inline-flex items-center gap-1.5">
           <span className="h-3 w-3 rounded bg-blue-100" /> Overtime
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span className="h-1.5 w-1.5 rounded-full bg-accent-green" /> Paid
         </span>
       </div>
     </div>

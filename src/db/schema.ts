@@ -178,6 +178,7 @@ export const attendance = sqliteTable(
     units: real("units").notNull(),
     wageSnapshot: real("wage_snapshot").notNull(),
     notes: text("notes"),
+    paymentTransactionId: integer("payment_transaction_id").references(() => transactions.id),
     createdBy: integer("created_by").references(() => users.id),
     createdAt: integer("created_at", { mode: "timestamp" })
       .notNull()
@@ -186,6 +187,7 @@ export const attendance = sqliteTable(
   (table) => [
     index("idx_attendance_worker_id").on(table.workerId),
     index("idx_attendance_date").on(table.date),
+    index("idx_attendance_payment_txn").on(table.paymentTransactionId),
     uniqueIndex("uniq_attendance_worker_date").on(table.workerId, table.date),
   ]
 );

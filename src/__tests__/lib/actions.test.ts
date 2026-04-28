@@ -54,7 +54,7 @@ jest.mock("@/db/schema", () => ({
   constructions: { id: "id", name: "name" },
   userConstructions: { userId: "user_id", constructionId: "construction_id" },
   workers: { id: "id", name: "name", constructionId: "construction_id", contractorId: "contractor_id", dailyWage: "daily_wage", isActive: "is_active" },
-  attendance: { id: "id", constructionId: "construction_id", workerId: "worker_id", date: "date", units: "units", wageSnapshot: "wage_snapshot" },
+  attendance: { id: "id", constructionId: "construction_id", workerId: "worker_id", date: "date", units: "units", wageSnapshot: "wage_snapshot", paymentTransactionId: "payment_transaction_id" },
 }));
 
 // Mock auth module - all values inline to avoid hoisting issues
@@ -102,6 +102,8 @@ import {
   deleteWorker,
   upsertAttendance,
   bulkUpsertAttendance,
+  deleteAttendance,
+  payContractorWages,
 } from "@/lib/actions";
 
 const { redirect } = require("next/navigation") as { redirect: jest.Mock };
@@ -1190,5 +1192,176 @@ describe("updateWorker", () => {
     const result = await updateWorker(1, initialState, formData);
     expect(result.status).toBe("success");
     expect(mockDb.update).toHaveBeenCalled();
+  });
+});
+
+describe("deleteAttendance with payment", () => {
+  beforeEach(() => resetMockDb());
+
+  test("refuses to delete a paid attendance row", async () => {
+    mockDb.get.mockReturnValueOnce({
+      id: 1,
+      workerId: 1,
+      constructionId: 1,
+      paymentTransactionId: 99, // already paid
+    });
+    const result = await deleteAttendance(1);
+    expect(result.status).toBe("error");
+    expect(result.message).toMatch(/already been paid/);
+    expect(mockDb.delete).not.toHaveBeenCalled();
+  });
+
+  test("deletes an unpaid attendance row", async () => {
+    mockDb.get.mockReturnValueOnce({
+      id: 1,
+      workerId: 1,
+      constructionId: 1,
+      paymentTransactionId: null,
+    });
+    const result = await deleteAttendance(1);
+    expect(result.status).toBe("success");
+    expect(mockDb.delete).toHaveBeenCalled();
+  });
+});
+
+describe("payContractorWages", () => {
+  beforeEach(() => resetMockDb());
+
+  test("rejects empty attendance selection", async () => {
+    const formData = makeFormData({
+      contractorId: "1",
+      date: "2026-04-21",
+      attendanceIds: JSON.stringify([]),
+      notes: "",
+    });
+    const result = await payContractorWages(initialState, formData);
+    expect(result.status).toBe("error");
+  });
+
+  test("rejects when contractor not in active construction", async () => {
+    mockDb.get.mockReturnValueOnce(undefined); // contractor lookup
+    const formData = makeFormData({
+      contractorId: "999",
+      date: "2026-04-21",
+      attendanceIds: JSON.stringify([1, 2]),
+      notes: "",
+    });
+    const result = await payContractorWages(initialState, formData);
+    expect(result.status).toBe("error");
+    expect(result.message).toMatch(/Contractor not found/);
+  });
+
+  test("rejects when contractor account missing", async () => {
+    mockDb.get
+      .mockReturnValueOnce({ id: 1, name: "Carpentry Co", constructionId: 1 }) // contractor
+      .mockReturnValueOnce(undefined); // contractor account
+    const formData = makeFormData({
+      contractorId: "1",
+      date: "2026-04-21",
+      attendanceIds: JSON.stringify([1]),
+      notes: "",
+    });
+    const result = await payContractorWages(initialState, formData);
+    expect(result.status).toBe("error");
+    expect(result.message).toMatch(/account not found/);
+  });
+
+  test("rejects when one of the entries is already paid", async () => {
+    mockDb.get
+      .mockReturnValueOnce({ id: 1, name: "Carpentry Co", constructionId: 1 }) // contractor
+      .mockReturnValueOnce({ id: 10, currentBalance: 0, contractorId: 1, accountType: "contractor" }) // contractor account
+      .mockReturnValueOnce({ id: 5, currentBalance: 100000, accountType: "primary" }); // primary account
+    (mockDb.all as jest.Mock).mockReturnValueOnce([
+      {
+        id: 1,
+        workerId: 1,
+        date: "2026-04-21",
+        units: 1,
+        wageSnapshot: 800,
+        paymentTransactionId: 42, // already paid
+        constructionId: 1,
+        contractorId: 1,
+      },
+    ]);
+    const formData = makeFormData({
+      contractorId: "1",
+      date: "2026-04-21",
+      attendanceIds: JSON.stringify([1]),
+      notes: "",
+    });
+    const result = await payContractorWages(initialState, formData);
+    expect(result.status).toBe("error");
+    expect(result.message).toMatch(/already paid/);
+  });
+
+  test("rejects when entries belong to a different contractor", async () => {
+    mockDb.get
+      .mockReturnValueOnce({ id: 1, name: "Carpentry Co", constructionId: 1 })
+      .mockReturnValueOnce({ id: 10, currentBalance: 0, contractorId: 1, accountType: "contractor" })
+      .mockReturnValueOnce({ id: 5, currentBalance: 100000, accountType: "primary" });
+    (mockDb.all as jest.Mock).mockReturnValueOnce([
+      {
+        id: 1,
+        workerId: 1,
+        date: "2026-04-21",
+        units: 1,
+        wageSnapshot: 800,
+        paymentTransactionId: null,
+        constructionId: 1,
+        contractorId: 2, // wrong contractor
+      },
+    ]);
+    const formData = makeFormData({
+      contractorId: "1",
+      date: "2026-04-21",
+      attendanceIds: JSON.stringify([1]),
+      notes: "",
+    });
+    const result = await payContractorWages(initialState, formData);
+    expect(result.status).toBe("error");
+    expect(result.message).toMatch(/different contractor/);
+  });
+
+  test("creates payment + mirror expense and stamps attendance on success", async () => {
+    mockDb.get
+      .mockReturnValueOnce({ id: 1, name: "Carpentry Co", constructionId: 1 }) // contractor
+      .mockReturnValueOnce({ id: 10, currentBalance: 0, contractorId: 1, accountType: "contractor" }) // contractor account
+      .mockReturnValueOnce({ id: 5, currentBalance: 100000, accountType: "primary" }) // primary account
+      .mockReturnValueOnce({ id: 7777 }); // returning() of payment transaction insert
+    (mockDb.all as jest.Mock).mockReturnValueOnce([
+      {
+        id: 1,
+        workerId: 1,
+        date: "2026-04-21",
+        units: 1,
+        wageSnapshot: 800,
+        paymentTransactionId: null,
+        constructionId: 1,
+        contractorId: 1,
+      },
+      {
+        id: 2,
+        workerId: 2,
+        date: "2026-04-21",
+        units: 0.5,
+        wageSnapshot: 600,
+        paymentTransactionId: null,
+        constructionId: 1,
+        contractorId: 1,
+      },
+    ]);
+
+    const formData = makeFormData({
+      contractorId: "1",
+      date: "2026-04-21",
+      attendanceIds: JSON.stringify([1, 2]),
+      notes: "April week 3",
+    });
+    const result = await payContractorWages(initialState, formData);
+    expect(result.status).toBe("success");
+    // Two inserts: contractor-side payment, owner-side mirror expense
+    expect(mockDb.insert).toHaveBeenCalledTimes(2);
+    // updates: contractor balance, primary balance, attendance stamps
+    expect(mockDb.update).toHaveBeenCalledTimes(3);
   });
 });
