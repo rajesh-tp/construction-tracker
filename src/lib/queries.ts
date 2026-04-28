@@ -1,8 +1,8 @@
 "use server";
 
 import { db } from "@/lib/db";
-import { accounts, constructions, contractors, transactions, users, userConstructions } from "@/db/schema";
-import { eq, desc, and, gte, lte, sql } from "drizzle-orm";
+import { accounts, constructions, contractors, transactions, users, userConstructions, workers, attendance } from "@/db/schema";
+import { eq, desc, asc, and, gte, lte, sql } from "drizzle-orm";
 
 // --- Construction Queries ---
 
@@ -404,4 +404,123 @@ export async function getUserConstructionNames() {
     map.set(row.userId, names);
   }
   return map;
+}
+
+// --- Worker Queries ---
+
+export async function getAllWorkers(
+  constructionId: number,
+  opts?: { contractorId?: number; activeOnly?: boolean }
+) {
+  const conditions = [eq(workers.constructionId, constructionId)];
+  if (opts?.contractorId) conditions.push(eq(workers.contractorId, opts.contractorId));
+  if (opts?.activeOnly) conditions.push(eq(workers.isActive, true));
+
+  return db
+    .select({
+      id: workers.id,
+      constructionId: workers.constructionId,
+      contractorId: workers.contractorId,
+      contractorName: contractors.name,
+      contractorType: contractors.contractorType,
+      name: workers.name,
+      dailyWage: workers.dailyWage,
+      phone: workers.phone,
+      notes: workers.notes,
+      isActive: workers.isActive,
+      createdAt: workers.createdAt,
+    })
+    .from(workers)
+    .innerJoin(contractors, eq(contractors.id, workers.contractorId))
+    .where(and(...conditions))
+    .orderBy(asc(workers.name))
+    .all();
+}
+
+export async function getActiveWorkersByContractor(contractorId: number, constructionId: number) {
+  return db
+    .select()
+    .from(workers)
+    .where(
+      and(
+        eq(workers.contractorId, contractorId),
+        eq(workers.constructionId, constructionId),
+        eq(workers.isActive, true)
+      )
+    )
+    .orderBy(asc(workers.name))
+    .all();
+}
+
+export async function getWorkerById(workerId: number, constructionId: number) {
+  return db
+    .select()
+    .from(workers)
+    .where(and(eq(workers.id, workerId), eq(workers.constructionId, constructionId)))
+    .get();
+}
+
+// --- Attendance Queries ---
+
+export async function getAttendanceForWorkerInRange(
+  workerId: number,
+  startDate: string,
+  endDate: string
+) {
+  return db
+    .select()
+    .from(attendance)
+    .where(
+      and(
+        eq(attendance.workerId, workerId),
+        gte(attendance.date, startDate),
+        lte(attendance.date, endDate)
+      )
+    )
+    .orderBy(asc(attendance.date))
+    .all();
+}
+
+export async function getAttendanceForDate(
+  constructionId: number,
+  date: string,
+  contractorId?: number
+) {
+  const conditions = [eq(attendance.constructionId, constructionId), eq(attendance.date, date)];
+
+  const rows = db
+    .select({
+      id: attendance.id,
+      workerId: attendance.workerId,
+      date: attendance.date,
+      units: attendance.units,
+      wageSnapshot: attendance.wageSnapshot,
+      notes: attendance.notes,
+      contractorId: workers.contractorId,
+    })
+    .from(attendance)
+    .innerJoin(workers, eq(workers.id, attendance.workerId))
+    .where(
+      contractorId
+        ? and(...conditions, eq(workers.contractorId, contractorId))
+        : and(...conditions)
+    )
+    .all();
+
+  return rows;
+}
+
+export async function getWorkerWageSummary(
+  workerId: number,
+  startDate: string,
+  endDate: string
+): Promise<{ totalUnits: number; totalWage: number; days: typeof attendance.$inferSelect[] }> {
+  const days = await getAttendanceForWorkerInRange(workerId, startDate, endDate);
+  let totalUnits = 0;
+  let totalWage = 0;
+  for (const d of days) {
+    totalUnits += d.units;
+    totalWage += d.units * d.wageSnapshot;
+  }
+  return { totalUnits, totalWage, days };
 }

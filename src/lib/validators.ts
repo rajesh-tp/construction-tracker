@@ -74,6 +74,48 @@ export const accountBalanceSchema = z.object({
   initialBalance: z.coerce.number().min(0, "Balance cannot be negative"),
 });
 
+export const ATTENDANCE_UNITS = [0, 0.5, 1, 1.5] as const;
+
+export const ATTENDANCE_UNIT_LABELS: Record<string, string> = {
+  "0": "Absent",
+  "0.5": "Half day",
+  "1": "Full day",
+  "1.5": "Overtime",
+};
+
+export const workerSchema = z.object({
+  name: z.string().min(1, "Name is required").max(100),
+  contractorId: z.coerce.number().int().positive("Select a contractor"),
+  dailyWage: z.coerce.number().nonnegative("Daily wage cannot be negative"),
+  phone: z.string().max(20).optional().default(""),
+  notes: z.string().max(500).optional().default(""),
+});
+
+export const attendanceSchema = z.object({
+  workerId: z.coerce.number().int().positive("Worker is required"),
+  date: z.string().min(1, "Date is required"),
+  units: z.coerce.number().refine(
+    (v) => (ATTENDANCE_UNITS as readonly number[]).includes(v),
+    { message: "Invalid attendance units" }
+  ),
+  wageSnapshot: z.coerce.number().nonnegative("Wage cannot be negative"),
+  notes: z.string().max(500).optional().default(""),
+});
+
+export const bulkAttendanceEntrySchema = z.object({
+  workerId: z.coerce.number().int().positive(),
+  units: z.coerce.number().refine(
+    (v) => (ATTENDANCE_UNITS as readonly number[]).includes(v),
+    { message: "Invalid attendance units" }
+  ),
+});
+
+export const bulkAttendanceSchema = z.object({
+  date: z.string().min(1, "Date is required"),
+  contractorId: z.coerce.number().int().positive("Contractor is required"),
+  entries: z.array(bulkAttendanceEntrySchema),
+});
+
 export const profileSchema = z.object({
   name: z.string().min(1, "Name is required").max(100),
   email: z.string().email("Valid email is required"),

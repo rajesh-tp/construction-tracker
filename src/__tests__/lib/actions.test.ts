@@ -53,6 +53,8 @@ jest.mock("@/db/schema", () => ({
   transactions: { id: "id", constructionId: "construction_id", accountId: "account_id", contractorId: "contractor_id", type: "type", amount: "amount", date: "date" },
   constructions: { id: "id", name: "name" },
   userConstructions: { userId: "user_id", constructionId: "construction_id" },
+  workers: { id: "id", name: "name", constructionId: "construction_id", contractorId: "contractor_id", dailyWage: "daily_wage", isActive: "is_active" },
+  attendance: { id: "id", constructionId: "construction_id", workerId: "worker_id", date: "date", units: "units", wageSnapshot: "wage_snapshot" },
 }));
 
 // Mock auth module - all values inline to avoid hoisting issues
@@ -95,6 +97,11 @@ import {
   deleteUser,
   updateTransaction,
   updateProfile,
+  createWorker,
+  updateWorker,
+  deleteWorker,
+  upsertAttendance,
+  bulkUpsertAttendance,
 } from "@/lib/actions";
 
 const { redirect } = require("next/navigation") as { redirect: jest.Mock };
@@ -973,5 +980,215 @@ describe("createUser contractor auto-assign", () => {
     expect(result.status).toBe("success");
     // insert: user + userConstructions
     expect(mockDb.insert).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("createWorker", () => {
+  beforeEach(() => resetMockDb());
+
+  test("rejects negative wage", async () => {
+    const formData = makeFormData({
+      name: "Suresh",
+      contractorId: "1",
+      dailyWage: "-50",
+      phone: "",
+      notes: "",
+    });
+    const result = await createWorker(initialState, formData);
+    expect(result.status).toBe("error");
+    expect(result.errors?.dailyWage).toBeDefined();
+  });
+
+  test("rejects when contractor not in active construction", async () => {
+    mockDb.get.mockReturnValueOnce(undefined); // contractor lookup returns nothing
+    const formData = makeFormData({
+      name: "Suresh",
+      contractorId: "999",
+      dailyWage: "800",
+      phone: "",
+      notes: "",
+    });
+    const result = await createWorker(initialState, formData);
+    expect(result.status).toBe("error");
+    expect(result.message).toMatch(/Contractor not found/);
+  });
+
+  test("creates worker on valid input", async () => {
+    mockDb.get.mockReturnValueOnce({ id: 1, name: "Carpentry Co", constructionId: 1 }); // contractor exists
+    const formData = makeFormData({
+      name: "Suresh",
+      contractorId: "1",
+      dailyWage: "800",
+      phone: "9876543210",
+      notes: "",
+    });
+    const result = await createWorker(initialState, formData);
+    expect(result.status).toBe("success");
+    expect(mockDb.insert).toHaveBeenCalled();
+  });
+});
+
+describe("upsertAttendance", () => {
+  beforeEach(() => resetMockDb());
+
+  test("rejects invalid units", async () => {
+    const formData = makeFormData({
+      workerId: "1",
+      date: "2026-04-21",
+      units: "2",
+      wageSnapshot: "800",
+      notes: "",
+    });
+    const result = await upsertAttendance(initialState, formData);
+    expect(result.status).toBe("error");
+  });
+
+  test("rejects when worker not in active construction", async () => {
+    mockDb.get.mockReturnValueOnce(undefined); // worker lookup returns nothing
+    const formData = makeFormData({
+      workerId: "999",
+      date: "2026-04-21",
+      units: "1",
+      wageSnapshot: "800",
+      notes: "",
+    });
+    const result = await upsertAttendance(initialState, formData);
+    expect(result.status).toBe("error");
+    expect(result.message).toMatch(/Worker not found/);
+  });
+
+  test("inserts when no existing row for date", async () => {
+    mockDb.get
+      .mockReturnValueOnce({ id: 1, dailyWage: 800, constructionId: 1 }) // worker
+      .mockReturnValueOnce(undefined); // existing attendance — none
+    const formData = makeFormData({
+      workerId: "1",
+      date: "2026-04-21",
+      units: "1",
+      wageSnapshot: "800",
+      notes: "",
+    });
+    const result = await upsertAttendance(initialState, formData);
+    expect(result.status).toBe("success");
+    expect(mockDb.insert).toHaveBeenCalled();
+    expect(mockDb.update).not.toHaveBeenCalled();
+  });
+
+  test("updates existing row when one already exists for date", async () => {
+    mockDb.get
+      .mockReturnValueOnce({ id: 1, dailyWage: 800, constructionId: 1 }) // worker
+      .mockReturnValueOnce({ id: 42, units: 0.5, wageSnapshot: 800 }); // existing attendance
+    const formData = makeFormData({
+      workerId: "1",
+      date: "2026-04-21",
+      units: "1",
+      wageSnapshot: "800",
+      notes: "",
+    });
+    const result = await upsertAttendance(initialState, formData);
+    expect(result.status).toBe("success");
+    expect(mockDb.update).toHaveBeenCalled();
+    expect(mockDb.insert).not.toHaveBeenCalled();
+  });
+});
+
+describe("bulkUpsertAttendance", () => {
+  beforeEach(() => resetMockDb());
+
+  test("rejects invalid units inside entries", async () => {
+    const formData = makeFormData({
+      date: "2026-04-21",
+      contractorId: "1",
+      entries: JSON.stringify([{ workerId: 1, units: 3 }]),
+    });
+    const result = await bulkUpsertAttendance(initialState, formData);
+    expect(result.status).toBe("error");
+  });
+
+  test("upserts each entry, snapshotting wage from worker", async () => {
+    // Worker fetch (all() returns the workers under contractor)
+    (mockDb.all as jest.Mock).mockReturnValueOnce([
+      { id: 1, dailyWage: 800 },
+      { id: 2, dailyWage: 600 },
+    ]);
+    // For each entry: existing attendance lookup returns undefined => insert
+    mockDb.get
+      .mockReturnValueOnce(undefined)
+      .mockReturnValueOnce(undefined);
+
+    const formData = makeFormData({
+      date: "2026-04-21",
+      contractorId: "1",
+      entries: JSON.stringify([
+        { workerId: 1, units: 1 },
+        { workerId: 2, units: 0.5 },
+      ]),
+    });
+    const result = await bulkUpsertAttendance(initialState, formData);
+    expect(result.status).toBe("success");
+    expect(mockDb.insert).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("deleteWorker", () => {
+  beforeEach(() => resetMockDb());
+
+  test("returns error when worker not found", async () => {
+    mockDb.get.mockReturnValueOnce(undefined);
+    const result = await deleteWorker(99);
+    expect(result.status).toBe("error");
+  });
+
+  test("soft-deletes (deactivates) when attendance history exists", async () => {
+    mockDb.get
+      .mockReturnValueOnce({ id: 1, name: "Suresh", constructionId: 1 }) // worker
+      .mockReturnValueOnce({ count: 5 }); // attendance count > 0
+    const result = await deleteWorker(1);
+    expect(result.status).toBe("success");
+    expect(mockDb.update).toHaveBeenCalled();
+    expect(mockDb.delete).not.toHaveBeenCalled();
+    expect(result.message).toMatch(/deactivated/);
+  });
+
+  test("hard-deletes when no attendance exists", async () => {
+    mockDb.get
+      .mockReturnValueOnce({ id: 1, name: "Suresh", constructionId: 1 }) // worker
+      .mockReturnValueOnce({ count: 0 }); // no attendance
+    const result = await deleteWorker(1);
+    expect(result.status).toBe("success");
+    expect(mockDb.delete).toHaveBeenCalled();
+  });
+});
+
+describe("updateWorker", () => {
+  beforeEach(() => resetMockDb());
+
+  test("returns error when worker not in active construction", async () => {
+    mockDb.get.mockReturnValueOnce(undefined); // worker lookup
+    const formData = makeFormData({
+      name: "Suresh",
+      contractorId: "1",
+      dailyWage: "900",
+      phone: "",
+      notes: "",
+    });
+    const result = await updateWorker(99, initialState, formData);
+    expect(result.status).toBe("error");
+  });
+
+  test("updates worker on valid input", async () => {
+    mockDb.get
+      .mockReturnValueOnce({ id: 1, constructionId: 1 }) // worker
+      .mockReturnValueOnce({ id: 1, constructionId: 1 }); // contractor lookup
+    const formData = makeFormData({
+      name: "Suresh",
+      contractorId: "1",
+      dailyWage: "900",
+      phone: "",
+      notes: "",
+    });
+    const result = await updateWorker(1, initialState, formData);
+    expect(result.status).toBe("success");
+    expect(mockDb.update).toHaveBeenCalled();
   });
 });

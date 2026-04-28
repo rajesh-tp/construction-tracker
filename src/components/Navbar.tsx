@@ -10,6 +10,7 @@ import type { Construction } from "@/db/schema";
 const navLinks = [
   { href: "/", label: "Dashboard" },
   { href: "/contractors", label: "Contractors" },
+  { href: "/workers", label: "Workers" },
   { href: "/accounts", label: "Accounts" },
   { href: "/transactions", label: "Transactions" },
   { href: "/reports", label: "Reports" },
