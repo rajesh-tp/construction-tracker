@@ -9,6 +9,7 @@ import {
   workerSchema,
   attendanceSchema,
   bulkAttendanceSchema,
+  wagePaymentSchema,
   ATTENDANCE_UNITS,
   CONTRACTOR_TYPES,
   TRANSACTION_CATEGORIES,
@@ -535,6 +536,48 @@ describe("bulkAttendanceSchema", () => {
       date: "2026-04-21",
       contractorId: "1",
       entries: [{ workerId: 1, units: 3 }],
+    });
+    expect(r.success).toBe(false);
+  });
+});
+
+describe("wagePaymentSchema", () => {
+  test("accepts a valid payment with multiple attendance ids", () => {
+    const r = wagePaymentSchema.safeParse({
+      contractorId: "1",
+      date: "2026-04-21",
+      attendanceIds: [1, 2, 3],
+      notes: "",
+    });
+    expect(r.success).toBe(true);
+  });
+
+  test("rejects empty attendance list", () => {
+    const r = wagePaymentSchema.safeParse({
+      contractorId: "1",
+      date: "2026-04-21",
+      attendanceIds: [],
+      notes: "",
+    });
+    expect(r.success).toBe(false);
+  });
+
+  test("rejects missing contractor", () => {
+    const r = wagePaymentSchema.safeParse({
+      contractorId: "0",
+      date: "2026-04-21",
+      attendanceIds: [1],
+      notes: "",
+    });
+    expect(r.success).toBe(false);
+  });
+
+  test("rejects empty date", () => {
+    const r = wagePaymentSchema.safeParse({
+      contractorId: "1",
+      date: "",
+      attendanceIds: [1],
+      notes: "",
     });
     expect(r.success).toBe(false);
   });

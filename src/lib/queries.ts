@@ -514,13 +514,88 @@ export async function getWorkerWageSummary(
   workerId: number,
   startDate: string,
   endDate: string
-): Promise<{ totalUnits: number; totalWage: number; days: typeof attendance.$inferSelect[] }> {
+): Promise<{
+  totalUnits: number;
+  totalWage: number;
+  paidWage: number;
+  unpaidWage: number;
+  days: typeof attendance.$inferSelect[];
+}> {
   const days = await getAttendanceForWorkerInRange(workerId, startDate, endDate);
   let totalUnits = 0;
   let totalWage = 0;
+  let paidWage = 0;
+  let unpaidWage = 0;
   for (const d of days) {
+    const dayWage = d.units * d.wageSnapshot;
     totalUnits += d.units;
-    totalWage += d.units * d.wageSnapshot;
+    totalWage += dayWage;
+    if (d.paymentTransactionId !== null) paidWage += dayWage;
+    else unpaidWage += dayWage;
   }
-  return { totalUnits, totalWage, days };
+  return { totalUnits, totalWage, paidWage, unpaidWage, days };
+}
+
+// Unpaid attendance grouped by worker, scoped to a contractor + construction
+export async function getUnpaidAttendanceByContractor(
+  contractorId: number,
+  constructionId: number
+) {
+  const rows = db
+    .select({
+      attendanceId: attendance.id,
+      workerId: attendance.workerId,
+      workerName: workers.name,
+      workerActive: workers.isActive,
+      date: attendance.date,
+      units: attendance.units,
+      wageSnapshot: attendance.wageSnapshot,
+    })
+    .from(attendance)
+    .innerJoin(workers, eq(workers.id, attendance.workerId))
+    .where(
+      and(
+        eq(workers.contractorId, contractorId),
+        eq(workers.constructionId, constructionId),
+        sql`${attendance.paymentTransactionId} IS NULL`
+      )
+    )
+    .orderBy(asc(workers.name), asc(attendance.date))
+    .all();
+
+  // Group by worker
+  type Day = { attendanceId: number; date: string; units: number; wageSnapshot: number };
+  type Group = { workerId: number; workerName: string; workerActive: boolean; days: Day[]; totalWage: number };
+  const map = new Map<number, Group>();
+  for (const r of rows) {
+    let g = map.get(r.workerId);
+    if (!g) {
+      g = { workerId: r.workerId, workerName: r.workerName, workerActive: r.workerActive, days: [], totalWage: 0 };
+      map.set(r.workerId, g);
+    }
+    g.days.push({ attendanceId: r.attendanceId, date: r.date, units: r.units, wageSnapshot: r.wageSnapshot });
+    g.totalWage += r.units * r.wageSnapshot;
+  }
+  return Array.from(map.values());
+}
+
+export async function getWagePaymentsForWorker(workerId: number) {
+  // Returns transactions that paid this worker's attendance (most recent first)
+  const rows = db
+    .select({
+      transactionId: transactions.id,
+      date: transactions.date,
+      description: transactions.description,
+      amount: transactions.amount,
+      attendanceCount: sql<number>`COUNT(${attendance.id})`,
+      workerWage: sql<number>`SUM(${attendance.units} * ${attendance.wageSnapshot})`,
+    })
+    .from(transactions)
+    .innerJoin(attendance, eq(attendance.paymentTransactionId, transactions.id))
+    .where(eq(attendance.workerId, workerId))
+    .groupBy(transactions.id, transactions.date, transactions.description, transactions.amount)
+    .orderBy(desc(transactions.date))
+    .all();
+
+  return rows;
 }
