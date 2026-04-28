@@ -1,8 +1,8 @@
 "use server";
 
 import { db } from "@/lib/db";
-import { users, contractors, accounts, transactions, constructions, userConstructions } from "@/db/schema";
-import { contractorSchema, transactionSchema, loginSchema, accountBalanceSchema, profileSchema, constructionSchema, userManageSchema } from "@/lib/validators";
+import { users, contractors, accounts, transactions, constructions, userConstructions, workers, attendance } from "@/db/schema";
+import { contractorSchema, transactionSchema, loginSchema, accountBalanceSchema, profileSchema, constructionSchema, userManageSchema, workerSchema, attendanceSchema, bulkAttendanceSchema } from "@/lib/validators";
 import { revalidatePath } from "next/cache";
 import { createSession, deleteSession, requireOwner, requireSuperAdmin, getActiveConstructionId, requireConstructionAccess, getSessionPayload } from "@/lib/auth";
 import { redirect } from "next/navigation";
@@ -1092,6 +1092,371 @@ export async function deleteContractor(id: number): Promise<ActionState> {
   return {
     status: "success",
     message: `Contractor "${contractor.name}" deleted.`,
+    timestamp: Date.now(),
+  };
+}
+
+// ── Workers ─────────────────────────────────────────────────────────
+
+export async function createWorker(prevState: ActionState, formData: FormData): Promise<ActionState> {
+  await requireOwner();
+  const constructionId = await getActiveConstructionId();
+
+  const raw = {
+    name: formData.get("name"),
+    contractorId: formData.get("contractorId"),
+    dailyWage: formData.get("dailyWage"),
+    phone: formData.get("phone") ?? "",
+    notes: formData.get("notes") ?? "",
+  };
+
+  const parsed = workerSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      status: "error",
+      message: "Validation failed. Please check the form.",
+      errors: parseFormErrors(parsed.error),
+      timestamp: Date.now(),
+    };
+  }
+
+  // Verify contractor belongs to the active construction
+  const contractor = db
+    .select()
+    .from(contractors)
+    .where(and(eq(contractors.id, parsed.data.contractorId), eq(contractors.constructionId, constructionId)))
+    .get();
+
+  if (!contractor) {
+    return { status: "error", message: "Contractor not found.", timestamp: Date.now() };
+  }
+
+  db.insert(workers)
+    .values({
+      constructionId,
+      contractorId: parsed.data.contractorId,
+      name: parsed.data.name,
+      dailyWage: parsed.data.dailyWage,
+      phone: parsed.data.phone || null,
+      notes: parsed.data.notes || null,
+    })
+    .run();
+
+  revalidatePath("/workers");
+
+  return {
+    status: "success",
+    message: `Worker "${parsed.data.name}" added.`,
+    timestamp: Date.now(),
+  };
+}
+
+export async function updateWorker(
+  workerId: number,
+  prevState: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  await requireOwner();
+  const constructionId = await getActiveConstructionId();
+
+  const worker = db
+    .select()
+    .from(workers)
+    .where(and(eq(workers.id, workerId), eq(workers.constructionId, constructionId)))
+    .get();
+
+  if (!worker) {
+    return { status: "error", message: "Worker not found.", timestamp: Date.now() };
+  }
+
+  const raw = {
+    name: formData.get("name"),
+    contractorId: formData.get("contractorId"),
+    dailyWage: formData.get("dailyWage"),
+    phone: formData.get("phone") ?? "",
+    notes: formData.get("notes") ?? "",
+  };
+
+  const parsed = workerSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      status: "error",
+      message: "Validation failed. Please check the form.",
+      errors: parseFormErrors(parsed.error),
+      timestamp: Date.now(),
+    };
+  }
+
+  // Verify contractor belongs to the active construction
+  const contractor = db
+    .select()
+    .from(contractors)
+    .where(and(eq(contractors.id, parsed.data.contractorId), eq(contractors.constructionId, constructionId)))
+    .get();
+
+  if (!contractor) {
+    return { status: "error", message: "Contractor not found.", timestamp: Date.now() };
+  }
+
+  db.update(workers)
+    .set({
+      name: parsed.data.name,
+      contractorId: parsed.data.contractorId,
+      dailyWage: parsed.data.dailyWage,
+      phone: parsed.data.phone || null,
+      notes: parsed.data.notes || null,
+    })
+    .where(eq(workers.id, workerId))
+    .run();
+
+  revalidatePath("/workers");
+  revalidatePath(`/workers/${workerId}`);
+
+  return {
+    status: "success",
+    message: "Worker updated.",
+    timestamp: Date.now(),
+  };
+}
+
+export async function toggleWorkerActive(workerId: number, isActive: boolean): Promise<void> {
+  await requireOwner();
+  const constructionId = await getActiveConstructionId();
+
+  const worker = db
+    .select()
+    .from(workers)
+    .where(and(eq(workers.id, workerId), eq(workers.constructionId, constructionId)))
+    .get();
+
+  if (!worker) return;
+
+  db.update(workers).set({ isActive }).where(eq(workers.id, workerId)).run();
+  revalidatePath("/workers");
+}
+
+export async function deleteWorker(workerId: number): Promise<ActionState> {
+  await requireOwner();
+  const constructionId = await getActiveConstructionId();
+
+  const worker = db
+    .select()
+    .from(workers)
+    .where(and(eq(workers.id, workerId), eq(workers.constructionId, constructionId)))
+    .get();
+
+  if (!worker) {
+    return { status: "error", message: "Worker not found.", timestamp: Date.now() };
+  }
+
+  // If any attendance rows exist, soft-delete by setting isActive=false
+  const attendanceCount = db
+    .select({ count: sql<number>`COUNT(*)` })
+    .from(attendance)
+    .where(eq(attendance.workerId, workerId))
+    .get();
+
+  if (attendanceCount && attendanceCount.count > 0) {
+    db.update(workers).set({ isActive: false }).where(eq(workers.id, workerId)).run();
+    revalidatePath("/workers");
+    return {
+      status: "success",
+      message: `Worker "${worker.name}" deactivated (has attendance history).`,
+      timestamp: Date.now(),
+    };
+  }
+
+  db.delete(workers).where(eq(workers.id, workerId)).run();
+  revalidatePath("/workers");
+
+  return {
+    status: "success",
+    message: `Worker "${worker.name}" deleted.`,
+    timestamp: Date.now(),
+  };
+}
+
+// ── Attendance ──────────────────────────────────────────────────────
+
+export async function upsertAttendance(prevState: ActionState, formData: FormData): Promise<ActionState> {
+  await requireOwner();
+  const constructionId = await getActiveConstructionId();
+  const session = await getSessionPayload();
+
+  const raw = {
+    workerId: formData.get("workerId"),
+    date: formData.get("date"),
+    units: formData.get("units"),
+    wageSnapshot: formData.get("wageSnapshot"),
+    notes: formData.get("notes") ?? "",
+  };
+
+  const parsed = attendanceSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      status: "error",
+      message: "Validation failed.",
+      errors: parseFormErrors(parsed.error),
+      timestamp: Date.now(),
+    };
+  }
+
+  // Verify worker belongs to the active construction
+  const worker = db
+    .select()
+    .from(workers)
+    .where(and(eq(workers.id, parsed.data.workerId), eq(workers.constructionId, constructionId)))
+    .get();
+
+  if (!worker) {
+    return { status: "error", message: "Worker not found.", timestamp: Date.now() };
+  }
+
+  // Upsert: check for existing row
+  const existing = db
+    .select()
+    .from(attendance)
+    .where(and(eq(attendance.workerId, parsed.data.workerId), eq(attendance.date, parsed.data.date)))
+    .get();
+
+  if (existing) {
+    db.update(attendance)
+      .set({
+        units: parsed.data.units,
+        wageSnapshot: parsed.data.wageSnapshot,
+        notes: parsed.data.notes || null,
+      })
+      .where(eq(attendance.id, existing.id))
+      .run();
+  } else {
+    db.insert(attendance)
+      .values({
+        constructionId,
+        workerId: parsed.data.workerId,
+        date: parsed.data.date,
+        units: parsed.data.units,
+        wageSnapshot: parsed.data.wageSnapshot,
+        notes: parsed.data.notes || null,
+        createdBy: session?.userId ?? null,
+      })
+      .run();
+  }
+
+  revalidatePath(`/workers/${parsed.data.workerId}`);
+  revalidatePath("/workers/attendance");
+
+  return {
+    status: "success",
+    message: "Attendance saved.",
+    timestamp: Date.now(),
+  };
+}
+
+export async function bulkUpsertAttendance(prevState: ActionState, formData: FormData): Promise<ActionState> {
+  await requireOwner();
+  const constructionId = await getActiveConstructionId();
+  const session = await getSessionPayload();
+
+  const entriesRaw = formData.get("entries");
+  let entries: unknown;
+  try {
+    entries = entriesRaw ? JSON.parse(String(entriesRaw)) : [];
+  } catch {
+    return { status: "error", message: "Invalid entries payload.", timestamp: Date.now() };
+  }
+
+  const parsed = bulkAttendanceSchema.safeParse({
+    date: formData.get("date"),
+    contractorId: formData.get("contractorId"),
+    entries,
+  });
+
+  if (!parsed.success) {
+    return {
+      status: "error",
+      message: "Validation failed.",
+      errors: parseFormErrors(parsed.error),
+      timestamp: Date.now(),
+    };
+  }
+
+  // Fetch all workers for this contractor in active construction (for wage snapshot)
+  const allWorkers = db
+    .select()
+    .from(workers)
+    .where(
+      and(
+        eq(workers.constructionId, constructionId),
+        eq(workers.contractorId, parsed.data.contractorId)
+      )
+    )
+    .all();
+
+  const workerMap = new Map(allWorkers.map((w) => [w.id, w]));
+
+  for (const entry of parsed.data.entries) {
+    const worker = workerMap.get(entry.workerId);
+    if (!worker) continue;
+
+    const existing = db
+      .select()
+      .from(attendance)
+      .where(and(eq(attendance.workerId, entry.workerId), eq(attendance.date, parsed.data.date)))
+      .get();
+
+    if (existing) {
+      db.update(attendance)
+        .set({ units: entry.units, wageSnapshot: worker.dailyWage })
+        .where(eq(attendance.id, existing.id))
+        .run();
+    } else {
+      db.insert(attendance)
+        .values({
+          constructionId,
+          workerId: entry.workerId,
+          date: parsed.data.date,
+          units: entry.units,
+          wageSnapshot: worker.dailyWage,
+          createdBy: session?.userId ?? null,
+        })
+        .run();
+    }
+  }
+
+  revalidatePath("/workers/attendance");
+  for (const entry of parsed.data.entries) {
+    revalidatePath(`/workers/${entry.workerId}`);
+  }
+
+  return {
+    status: "success",
+    message: `Attendance saved for ${parsed.data.entries.length} worker(s).`,
+    timestamp: Date.now(),
+  };
+}
+
+export async function deleteAttendance(attendanceId: number): Promise<ActionState> {
+  await requireOwner();
+  const constructionId = await getActiveConstructionId();
+
+  const row = db
+    .select()
+    .from(attendance)
+    .where(and(eq(attendance.id, attendanceId), eq(attendance.constructionId, constructionId)))
+    .get();
+
+  if (!row) {
+    return { status: "error", message: "Attendance entry not found.", timestamp: Date.now() };
+  }
+
+  db.delete(attendance).where(eq(attendance.id, attendanceId)).run();
+
+  revalidatePath(`/workers/${row.workerId}`);
+  revalidatePath("/workers/attendance");
+
+  return {
+    status: "success",
+    message: "Attendance removed.",
     timestamp: Date.now(),
   };
 }

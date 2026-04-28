@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real, index, type AnySQLiteColumn } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, index, uniqueIndex, type AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
 // --- Users (defined first, forward-references use AnySQLiteColumn) ---
@@ -139,3 +139,56 @@ export const transactions = sqliteTable(
 
 export type Transaction = typeof transactions.$inferSelect;
 export type NewTransaction = typeof transactions.$inferInsert;
+
+// --- Workers ---
+
+export const workers = sqliteTable(
+  "workers",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    constructionId: integer("construction_id").notNull().references(() => constructions.id),
+    contractorId: integer("contractor_id").notNull().references(() => contractors.id),
+    name: text("name").notNull(),
+    dailyWage: real("daily_wage").notNull(),
+    phone: text("phone"),
+    notes: text("notes"),
+    isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => [
+    index("idx_workers_construction_id").on(table.constructionId),
+    index("idx_workers_contractor_id").on(table.contractorId),
+  ]
+);
+
+export type Worker = typeof workers.$inferSelect;
+export type NewWorker = typeof workers.$inferInsert;
+
+// --- Attendance ---
+
+export const attendance = sqliteTable(
+  "attendance",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    constructionId: integer("construction_id").notNull().references(() => constructions.id),
+    workerId: integer("worker_id").notNull().references(() => workers.id),
+    date: text("date").notNull(),
+    units: real("units").notNull(),
+    wageSnapshot: real("wage_snapshot").notNull(),
+    notes: text("notes"),
+    createdBy: integer("created_by").references(() => users.id),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => [
+    index("idx_attendance_worker_id").on(table.workerId),
+    index("idx_attendance_date").on(table.date),
+    uniqueIndex("uniq_attendance_worker_date").on(table.workerId, table.date),
+  ]
+);
+
+export type Attendance = typeof attendance.$inferSelect;
+export type NewAttendance = typeof attendance.$inferInsert;

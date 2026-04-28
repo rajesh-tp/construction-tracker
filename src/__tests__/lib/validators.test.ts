@@ -6,6 +6,10 @@ import {
   userManageSchema,
   accountBalanceSchema,
   profileSchema,
+  workerSchema,
+  attendanceSchema,
+  bulkAttendanceSchema,
+  ATTENDANCE_UNITS,
   CONTRACTOR_TYPES,
   TRANSACTION_CATEGORIES,
   TRANSACTION_TYPES,
@@ -443,5 +447,95 @@ describe("profileSchema", () => {
       email: "invalid",
     });
     expect(result.success).toBe(false);
+  });
+});
+
+describe("workerSchema", () => {
+  const valid = {
+    name: "Suresh",
+    contractorId: "1",
+    dailyWage: "800",
+    phone: "",
+    notes: "",
+  };
+
+  test("accepts valid input", () => {
+    const r = workerSchema.safeParse(valid);
+    expect(r.success).toBe(true);
+  });
+
+  test("rejects empty name", () => {
+    const r = workerSchema.safeParse({ ...valid, name: "" });
+    expect(r.success).toBe(false);
+  });
+
+  test("rejects negative daily wage", () => {
+    const r = workerSchema.safeParse({ ...valid, dailyWage: "-100" });
+    expect(r.success).toBe(false);
+  });
+
+  test("rejects missing/zero contractorId", () => {
+    const r = workerSchema.safeParse({ ...valid, contractorId: "0" });
+    expect(r.success).toBe(false);
+  });
+});
+
+describe("attendanceSchema", () => {
+  const valid = {
+    workerId: "1",
+    date: "2026-04-21",
+    units: "1",
+    wageSnapshot: "800",
+    notes: "",
+  };
+
+  test("accepts units = 0, 0.5, 1, 1.5", () => {
+    for (const u of ATTENDANCE_UNITS) {
+      const r = attendanceSchema.safeParse({ ...valid, units: String(u) });
+      expect(r.success).toBe(true);
+    }
+  });
+
+  test("rejects units = 2", () => {
+    const r = attendanceSchema.safeParse({ ...valid, units: "2" });
+    expect(r.success).toBe(false);
+  });
+
+  test("rejects units = 0.25", () => {
+    const r = attendanceSchema.safeParse({ ...valid, units: "0.25" });
+    expect(r.success).toBe(false);
+  });
+
+  test("rejects empty date", () => {
+    const r = attendanceSchema.safeParse({ ...valid, date: "" });
+    expect(r.success).toBe(false);
+  });
+
+  test("rejects negative wageSnapshot", () => {
+    const r = attendanceSchema.safeParse({ ...valid, wageSnapshot: "-1" });
+    expect(r.success).toBe(false);
+  });
+});
+
+describe("bulkAttendanceSchema", () => {
+  test("accepts a list of valid entries", () => {
+    const r = bulkAttendanceSchema.safeParse({
+      date: "2026-04-21",
+      contractorId: "1",
+      entries: [
+        { workerId: 1, units: 1 },
+        { workerId: 2, units: 0.5 },
+      ],
+    });
+    expect(r.success).toBe(true);
+  });
+
+  test("rejects an entry with invalid units", () => {
+    const r = bulkAttendanceSchema.safeParse({
+      date: "2026-04-21",
+      contractorId: "1",
+      entries: [{ workerId: 1, units: 3 }],
+    });
+    expect(r.success).toBe(false);
   });
 });
