@@ -147,20 +147,24 @@ export async function getTransactionsByAccountId(accountId: number, construction
     .all();
 }
 
+export type TransactionFilters = {
+  accountId?: number;
+  contractorId?: number;
+  type?: string;
+  category?: string;
+  dateFrom?: string;
+  dateTo?: string;
+};
+
 function buildTransactionConditions(
   constructionId: number,
-  filters: {
-    accountId?: number;
-    contractorId?: number;
-    type?: string;
-    dateFrom?: string;
-    dateTo?: string;
-  }
+  filters: TransactionFilters
 ) {
   const conditions = [eq(transactions.constructionId, constructionId)];
   if (filters.accountId) conditions.push(eq(transactions.accountId, filters.accountId));
   if (filters.contractorId) conditions.push(eq(transactions.contractorId, filters.contractorId));
   if (filters.type) conditions.push(eq(transactions.type, filters.type as "expense" | "payment" | "adjustment"));
+  if (filters.category) conditions.push(eq(transactions.category, filters.category));
   if (filters.dateFrom) conditions.push(gte(transactions.date, filters.dateFrom));
   if (filters.dateTo) conditions.push(lte(transactions.date, filters.dateTo));
   return conditions;
@@ -168,13 +172,7 @@ function buildTransactionConditions(
 
 export async function getFilteredTransactionCount(
   constructionId: number,
-  filters: {
-    accountId?: number;
-    contractorId?: number;
-    type?: string;
-    dateFrom?: string;
-    dateTo?: string;
-  }
+  filters: TransactionFilters
 ) {
   const conditions = buildTransactionConditions(constructionId, filters);
   const result = db
@@ -187,13 +185,7 @@ export async function getFilteredTransactionCount(
 
 export async function getFilteredTransactions(
   constructionId: number,
-  filters: {
-    accountId?: number;
-    contractorId?: number;
-    type?: string;
-    dateFrom?: string;
-    dateTo?: string;
-  },
+  filters: TransactionFilters,
   pagination?: { page: number; pageSize: number }
 ) {
   const conditions = buildTransactionConditions(constructionId, filters);

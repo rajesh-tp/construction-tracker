@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback } from "react";
+import { TRANSACTION_CATEGORIES } from "@/lib/validators";
 import type { Account, Contractor } from "@/db/schema";
 
 type TransactionFiltersProps = {
@@ -11,6 +12,7 @@ type TransactionFiltersProps = {
     accountId?: string;
     contractorId?: string;
     type?: string;
+    category?: string;
     dateFrom?: string;
     dateTo?: string;
   };
@@ -90,6 +92,22 @@ export function TransactionFilters({
             <option value="expense">Expense</option>
             <option value="payment">Payment</option>
             <option value="adjustment">Adjustment</option>
+          </select>
+        </div>
+
+        <div className="min-w-[160px] flex-1">
+          <label className="mb-1 block text-xs font-medium text-text-muted">Category</label>
+          <select
+            value={currentFilters.category || ""}
+            onChange={(e) => updateFilters("category", e.target.value)}
+            className="w-full rounded-lg border border-border-strong px-3 py-2 text-sm text-text-heading focus:border-focus-border focus:ring-2 focus:ring-focus-ring focus:outline-none"
+          >
+            <option value="">All categories</option>
+            {TRANSACTION_CATEGORIES.map((cat) => (
+              <option key={cat} value={cat}>
+                {cat}
+              </option>
+            ))}
           </select>
         </div>
 
