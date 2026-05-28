@@ -24,6 +24,7 @@ export default async function TransactionsPage({
     accountId?: string;
     contractorId?: string;
     type?: string;
+    category?: string;
     dateFrom?: string;
     dateTo?: string;
     page?: string;
@@ -46,6 +47,7 @@ export default async function TransactionsPage({
     accountId: isContractor ? contractorAccountId : (params.accountId ? Number(params.accountId) : undefined),
     contractorId: params.contractorId ? Number(params.contractorId) : undefined,
     type: params.type || undefined,
+    category: params.category || undefined,
     dateFrom: params.dateFrom || undefined,
     dateTo: params.dateTo || undefined,
   };
