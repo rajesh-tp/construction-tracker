@@ -1,0 +1,1 @@
+ALTER TABLE `transactions` ADD `extra_amount` real DEFAULT 0 NOT NULL;

@@ -122,6 +122,7 @@ export const transactions = sqliteTable(
     category: text("category").notNull(),
     notes: text("notes"),
     receiptPath: text("receipt_path"),
+    extraAmount: real("extra_amount").notNull().default(0),
     createdBy: integer("created_by").references(() => users.id),
     createdAt: integer("created_at", { mode: "timestamp" })
       .notNull()

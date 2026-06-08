@@ -50,7 +50,7 @@ jest.mock("@/db/schema", () => ({
   users: { id: "id", email: "email", name: "name", role: "role", passwordHash: "password_hash", contractorId: "contractor_id" },
   contractors: { id: "id", name: "name", constructionId: "construction_id", isActive: "is_active" },
   accounts: { id: "id", accountType: "account_type", constructionId: "construction_id", contractorId: "contractor_id", currentBalance: "current_balance", initialBalance: "initial_balance" },
-  transactions: { id: "id", constructionId: "construction_id", accountId: "account_id", contractorId: "contractor_id", type: "type", amount: "amount", date: "date" },
+  transactions: { id: "id", constructionId: "construction_id", accountId: "account_id", contractorId: "contractor_id", type: "type", amount: "amount", extraAmount: "extra_amount", date: "date" },
   constructions: { id: "id", name: "name" },
   userConstructions: { userId: "user_id", constructionId: "construction_id" },
   workers: { id: "id", name: "name", constructionId: "construction_id", contractorId: "contractor_id", dailyWage: "daily_wage", isActive: "is_active" },
@@ -1232,6 +1232,7 @@ describe("payContractorWages", () => {
       contractorId: "1",
       date: "2026-04-21",
       attendanceIds: JSON.stringify([]),
+      amount: "1000",
       notes: "",
     });
     const result = await payContractorWages(initialState, formData);
@@ -1244,6 +1245,7 @@ describe("payContractorWages", () => {
       contractorId: "999",
       date: "2026-04-21",
       attendanceIds: JSON.stringify([1, 2]),
+      amount: "1000",
       notes: "",
     });
     const result = await payContractorWages(initialState, formData);
@@ -1259,6 +1261,7 @@ describe("payContractorWages", () => {
       contractorId: "1",
       date: "2026-04-21",
       attendanceIds: JSON.stringify([1]),
+      amount: "1000",
       notes: "",
     });
     const result = await payContractorWages(initialState, formData);
@@ -1287,6 +1290,7 @@ describe("payContractorWages", () => {
       contractorId: "1",
       date: "2026-04-21",
       attendanceIds: JSON.stringify([1]),
+      amount: "800",
       notes: "",
     });
     const result = await payContractorWages(initialState, formData);
@@ -1315,6 +1319,7 @@ describe("payContractorWages", () => {
       contractorId: "1",
       date: "2026-04-21",
       attendanceIds: JSON.stringify([1]),
+      amount: "800",
       notes: "",
     });
     const result = await payContractorWages(initialState, formData);
@@ -1322,7 +1327,48 @@ describe("payContractorWages", () => {
     expect(result.message).toMatch(/different contractor/);
   });
 
-  test("creates payment + mirror expense and stamps attendance on success", async () => {
+  test("rejects when amount is below wage total", async () => {
+    mockDb.get
+      .mockReturnValueOnce({ id: 1, name: "Carpentry Co", constructionId: 1 }) // contractor
+      .mockReturnValueOnce({ id: 10, currentBalance: 0, contractorId: 1, accountType: "contractor" }) // contractor account
+      .mockReturnValueOnce({ id: 5, currentBalance: 100000, accountType: "primary" }); // primary account
+    (mockDb.all as jest.Mock).mockReturnValueOnce([
+      {
+        id: 1,
+        workerId: 1,
+        date: "2026-04-21",
+        units: 1,
+        wageSnapshot: 1000,
+        paymentTransactionId: null,
+        constructionId: 1,
+        contractorId: 1,
+      },
+      {
+        id: 2,
+        workerId: 1,
+        date: "2026-04-22",
+        units: 1,
+        wageSnapshot: 1000,
+        paymentTransactionId: null,
+        constructionId: 1,
+        contractorId: 1,
+      },
+    ]);
+
+    const formData = makeFormData({
+      contractorId: "1",
+      date: "2026-04-22",
+      attendanceIds: JSON.stringify([1, 2]),
+      amount: "1500", // less than the ₹2000 wage total
+      notes: "",
+    });
+    const result = await payContractorWages(initialState, formData);
+    expect(result.status).toBe("error");
+    expect(result.message).toMatch(/at least/);
+    expect(mockDb.insert).not.toHaveBeenCalled();
+  });
+
+  test("creates payment + mirror expense and stamps attendance when amount equals wage total", async () => {
     mockDb.get
       .mockReturnValueOnce({ id: 1, name: "Carpentry Co", constructionId: 1 }) // contractor
       .mockReturnValueOnce({ id: 10, currentBalance: 0, contractorId: 1, accountType: "contractor" }) // contractor account
@@ -1351,17 +1397,79 @@ describe("payContractorWages", () => {
       },
     ]);
 
+    // wageTotal = 800 + 300 = 1100; amount = 1100; extra = 0
     const formData = makeFormData({
       contractorId: "1",
       date: "2026-04-21",
       attendanceIds: JSON.stringify([1, 2]),
+      amount: "1100",
       notes: "April week 3",
     });
     const result = await payContractorWages(initialState, formData);
     expect(result.status).toBe("success");
+    expect(result.message).not.toMatch(/advance/);
     // Two inserts: contractor-side payment, owner-side mirror expense
     expect(mockDb.insert).toHaveBeenCalledTimes(2);
     // updates: contractor balance, primary balance, attendance stamps
     expect(mockDb.update).toHaveBeenCalledTimes(3);
+  });
+
+  test("records the extra as advance when amount exceeds wage total", async () => {
+    mockDb.get
+      .mockReturnValueOnce({ id: 1, name: "Carpentry Co", constructionId: 1 }) // contractor
+      .mockReturnValueOnce({ id: 10, currentBalance: 0, contractorId: 1, accountType: "contractor" }) // contractor account
+      .mockReturnValueOnce({ id: 5, currentBalance: 100000, accountType: "primary" }) // primary account
+      .mockReturnValueOnce({ id: 8888 }); // returning() of payment transaction insert
+    (mockDb.all as jest.Mock).mockReturnValueOnce([
+      {
+        id: 11,
+        workerId: 1,
+        date: "2026-04-21",
+        units: 1,
+        wageSnapshot: 1000,
+        paymentTransactionId: null,
+        constructionId: 1,
+        contractorId: 1,
+      },
+      {
+        id: 12,
+        workerId: 1,
+        date: "2026-04-22",
+        units: 1,
+        wageSnapshot: 1000,
+        paymentTransactionId: null,
+        constructionId: 1,
+        contractorId: 1,
+      },
+    ]);
+
+    // wageTotal = 2000; amount = 2500; extra = 500
+    const formData = makeFormData({
+      contractorId: "1",
+      date: "2026-04-22",
+      attendanceIds: JSON.stringify([11, 12]),
+      amount: "2500",
+      notes: "",
+    });
+    const result = await payContractorWages(initialState, formData);
+    expect(result.status).toBe("success");
+    expect(result.message).toMatch(/advance/);
+
+    // Verify the contractor-side payment carried amount=2500 and extraAmount=500.
+    const valuesCalls = (mockDb.values as jest.Mock).mock.calls;
+    const paymentInsertArgs = valuesCalls.find(
+      (call) => call[0]?.type === "payment" && call[0]?.accountId === 10
+    );
+    expect(paymentInsertArgs).toBeTruthy();
+    expect(paymentInsertArgs![0].amount).toBe(2500);
+    expect(paymentInsertArgs![0].extraAmount).toBe(500);
+
+    // Mirror expense should also carry the same extra.
+    const mirrorInsertArgs = valuesCalls.find(
+      (call) => call[0]?.type === "expense" && call[0]?.accountId === 5
+    );
+    expect(mirrorInsertArgs).toBeTruthy();
+    expect(mirrorInsertArgs![0].amount).toBe(2500);
+    expect(mirrorInsertArgs![0].extraAmount).toBe(500);
   });
 });

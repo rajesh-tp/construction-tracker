@@ -1,5 +1,5 @@
 import { requireOwner, getActiveConstructionId } from "@/lib/auth";
-import { getWorkerById, getWorkerWageSummary } from "@/lib/queries";
+import { getWorkerById, getWorkerWageSummary, getWagePaymentsForWorker } from "@/lib/queries";
 import { ATTENDANCE_UNIT_LABELS } from "@/lib/validators";
 import { SummaryCard } from "@/components/SummaryCard";
 import { notFound } from "next/navigation";
@@ -45,6 +45,7 @@ export default async function WorkerWagesPage({
   if (!worker) notFound();
 
   const summary = await getWorkerWageSummary(worker.id, ALL_TIME_START, ALL_TIME_END);
+  const payments = await getWagePaymentsForWorker(worker.id);
 
   const allDays = [...summary.days].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
   const filteredDays = allDays.filter((d) => {
@@ -223,6 +224,43 @@ export default async function WorkerWagesPage({
               </table>
             </div>
           </>
+        )}
+      </div>
+
+      <div className="rounded-xl border border-border bg-surface p-5 shadow-sm">
+        <h2 className="mb-1 text-lg font-semibold text-text-heading">Wage Payments</h2>
+        <p className="mb-3 text-xs text-text-muted">
+          Payments that covered this worker&apos;s attendance. Advance (if any) is paid to the
+          contractor at the payment level, not allocated per day.
+        </p>
+        {payments.length === 0 ? (
+          <p className="text-sm text-text-muted">No payments recorded yet.</p>
+        ) : (
+          <ul className="space-y-2">
+            {payments.map((p) => (
+              <li
+                key={p.transactionId}
+                className="flex items-center justify-between rounded-lg border border-border/50 p-3 text-sm"
+              >
+                <div>
+                  <p className="font-medium text-text-primary">{p.date}</p>
+                  <p className="text-xs text-text-muted">
+                    {p.description} &middot; {p.attendanceCount} day(s) for this worker
+                  </p>
+                </div>
+                <div className="text-right">
+                  <span className="font-semibold text-text-heading">
+                    {formatCurrency(p.amount)}
+                  </span>
+                  {p.extraAmount > 0 && (
+                    <p className="text-xs text-accent-amber">
+                      incl. {formatCurrency(p.extraAmount)} advance
+                    </p>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
         )}
       </div>
     </div>

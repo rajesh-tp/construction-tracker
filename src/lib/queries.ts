@@ -582,13 +582,14 @@ export async function getWagePaymentsForWorker(workerId: number) {
       date: transactions.date,
       description: transactions.description,
       amount: transactions.amount,
+      extraAmount: transactions.extraAmount,
       attendanceCount: sql<number>`COUNT(${attendance.id})`,
       workerWage: sql<number>`SUM(${attendance.units} * ${attendance.wageSnapshot})`,
     })
     .from(transactions)
     .innerJoin(attendance, eq(attendance.paymentTransactionId, transactions.id))
     .where(eq(attendance.workerId, workerId))
-    .groupBy(transactions.id, transactions.date, transactions.description, transactions.amount)
+    .groupBy(transactions.id, transactions.date, transactions.description, transactions.amount, transactions.extraAmount)
     .orderBy(desc(transactions.date))
     .all();
 
