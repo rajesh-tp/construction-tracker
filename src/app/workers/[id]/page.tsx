@@ -184,9 +184,16 @@ export default async function WorkerDetailPage({
                     {p.description} &middot; {p.attendanceCount} day(s)
                   </p>
                 </div>
-                <span className="font-semibold text-accent-green">
-                  {formatCurrency(p.workerWage)}
-                </span>
+                <div className="text-right">
+                  <span className="font-semibold text-accent-green">
+                    {formatCurrency(p.workerWage)}
+                  </span>
+                  {p.extraAmount > 0 && (
+                    <p className="text-xs text-accent-amber">
+                      Payment incl. {formatCurrency(p.extraAmount)} advance
+                    </p>
+                  )}
+                </div>
               </li>
             ))}
           </ul>

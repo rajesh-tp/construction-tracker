@@ -1498,6 +1498,7 @@ export async function payContractorWages(
     contractorId: formData.get("contractorId"),
     date: formData.get("date"),
     attendanceIds: ids,
+    amount: formData.get("amount"),
     notes: formData.get("notes") ?? "",
   });
 
@@ -1580,13 +1581,25 @@ export async function payContractorWages(
     }
   }
 
-  const totalAmount = rows.reduce((sum, r) => sum + r.units * r.wageSnapshot, 0);
-  if (totalAmount <= 0) {
+  const wageTotal = rows.reduce((sum, r) => sum + r.units * r.wageSnapshot, 0);
+  if (wageTotal <= 0) {
     return { status: "error", message: "Total wage is zero — nothing to pay.", timestamp: Date.now() };
   }
 
+  const paymentAmount = parsed.data.amount;
+  if (paymentAmount < wageTotal) {
+    return {
+      status: "error",
+      message: `Amount must be at least ₹${wageTotal.toFixed(0)} (the wage total for the selected days).`,
+      timestamp: Date.now(),
+    };
+  }
+
+  const extraAmount = paymentAmount - wageTotal;
   const uniqueWorkers = new Set(rows.map((r) => r.workerId)).size;
-  const description = `Wages: ${rows.length} day(s) across ${uniqueWorkers} worker(s)`;
+  const baseDescription = `Wages: ${rows.length} day(s) across ${uniqueWorkers} worker(s)`;
+  const description =
+    extraAmount > 0 ? `${baseDescription} (+ ₹${extraAmount.toFixed(0)} advance)` : baseDescription;
 
   // Insert the contractor-side payment transaction
   const inserted = db
@@ -1597,7 +1610,8 @@ export async function payContractorWages(
       contractorId: contractor.id,
       date: parsed.data.date,
       description,
-      amount: totalAmount,
+      amount: paymentAmount,
+      extraAmount,
       type: "payment",
       category: "Labour Payment",
       notes: parsed.data.notes || null,
@@ -1612,7 +1626,7 @@ export async function payContractorWages(
 
   // Update contractor account balance
   db.update(accounts)
-    .set({ currentBalance: contractorAccount.currentBalance + totalAmount })
+    .set({ currentBalance: contractorAccount.currentBalance + paymentAmount })
     .where(eq(accounts.id, contractorAccount.id))
     .run();
 
@@ -1624,8 +1638,9 @@ export async function payContractorWages(
         accountId: primaryAccount.id,
         contractorId: contractor.id,
         date: parsed.data.date,
-        description: `Payment to ${contractor.name}`,
-        amount: totalAmount,
+        description: `Payment to ${contractor.name}${extraAmount > 0 ? ` (+ ₹${extraAmount.toFixed(0)} advance)` : ""}`,
+        amount: paymentAmount,
+        extraAmount,
         type: "expense",
         category: "Labour Payment",
         notes: parsed.data.notes || null,
@@ -1634,7 +1649,7 @@ export async function payContractorWages(
       .run();
 
     db.update(accounts)
-      .set({ currentBalance: primaryAccount.currentBalance - totalAmount })
+      .set({ currentBalance: primaryAccount.currentBalance - paymentAmount })
       .where(eq(accounts.id, primaryAccount.id))
       .run();
 
@@ -1656,9 +1671,10 @@ export async function payContractorWages(
     revalidatePath(`/workers/${workerId}`);
   }
 
+  const advanceSuffix = extraAmount > 0 ? ` (incl. ₹${extraAmount.toFixed(0)} advance)` : "";
   return {
     status: "success",
-    message: `Wage payment of ₹${totalAmount.toFixed(0)} recorded for ${contractor.name}.`,
+    message: `Wage payment of ₹${paymentAmount.toFixed(0)}${advanceSuffix} recorded for ${contractor.name}.`,
     timestamp: Date.now(),
   };
 }

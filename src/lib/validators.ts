@@ -120,6 +120,7 @@ export const wagePaymentSchema = z.object({
   contractorId: z.coerce.number().int().positive("Contractor is required"),
   date: z.string().min(1, "Date is required"),
   attendanceIds: z.array(z.coerce.number().int().positive()).min(1, "Select at least one attendance entry"),
+  amount: z.coerce.number().positive("Amount must be greater than 0"),
   notes: z.string().max(500).optional().default(""),
 });
 

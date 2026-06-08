@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useState } from "react";
+import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { payContractorWages, type ActionState } from "@/lib/actions";
 import { toast } from "sonner";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -53,6 +53,14 @@ export function PayWagesForm({ contractorId, contractors, groups }: Props) {
   });
   const [paymentDate, setPaymentDate] = useState<string>(todayStr());
   const [notes, setNotes] = useState<string>("");
+  const [amountInput, setAmountInput] = useState<string>(() => {
+    let total = 0;
+    for (const g of groups) for (const d of g.days) total += d.units * d.wageSnapshot;
+    return total > 0 ? String(total) : "";
+  });
+  const [amountTouched, setAmountTouched] = useState<boolean>(false);
+  const amountTouchedRef = useRef(amountTouched);
+  amountTouchedRef.current = amountTouched;
 
   useEffect(() => {
     // Reset selection on contractor change
@@ -108,6 +116,25 @@ export function PayWagesForm({ contractorId, contractors, groups }: Props) {
     return total;
   }, [groups, selectedIds]);
 
+  // Keep the amount in sync with the wage total ONLY while the user hasn't
+  // typed anything yet. Once they touch the field, leave their value alone and
+  // let validation surface any issues — otherwise clearing the input to retype
+  // would snap back to the wage total.
+  const prevTotalRef = useRef<number>(totalSelected);
+  useEffect(() => {
+    if (prevTotalRef.current === totalSelected) return;
+    prevTotalRef.current = totalSelected;
+    if (!amountTouchedRef.current) {
+      setAmountInput(totalSelected > 0 ? String(totalSelected) : "");
+    }
+  }, [totalSelected]);
+
+  const parsedAmount = Number(amountInput);
+  const amountValid = Number.isFinite(parsedAmount) && parsedAmount >= totalSelected && totalSelected > 0;
+  const extra = amountValid ? Math.max(0, parsedAmount - totalSelected) : 0;
+  const amountBelowTotal =
+    amountTouched && totalSelected > 0 && Number.isFinite(parsedAmount) && parsedAmount < totalSelected;
+
   const idsArr = Array.from(selectedIds);
 
   return (
@@ -143,6 +170,7 @@ export function PayWagesForm({ contractorId, contractors, groups }: Props) {
           <input type="hidden" name="date" value={paymentDate} />
           <input type="hidden" name="notes" value={notes} />
           <input type="hidden" name="attendanceIds" value={JSON.stringify(idsArr)} />
+          <input type="hidden" name="amount" value={amountInput} />
 
           <div className="space-y-3">
             {groups.map((g) => {
@@ -231,19 +259,55 @@ export function PayWagesForm({ contractorId, contractors, groups }: Props) {
             </div>
           </div>
 
-          <div className="flex items-center justify-between border-t border-border pt-4">
-            <div>
-              <p className="text-sm text-text-secondary">Total to pay</p>
-              <p className="text-xl font-semibold text-accent-green">{formatCurrency(totalSelected)}</p>
-              <p className="text-xs text-text-faint">{idsArr.length} attendance entries</p>
+          <div className="border-t border-border pt-4 space-y-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+              <div className="flex-1">
+                <label htmlFor="amount" className="mb-1 block text-sm font-medium text-text-secondary">
+                  Total to pay *
+                </label>
+                <div className="relative max-w-xs">
+                  <span className="absolute inset-y-0 left-3 flex items-center text-sm text-text-muted">₹</span>
+                  <input
+                    type="number"
+                    id="amount"
+                    min="0"
+                    step="0.01"
+                    value={amountInput}
+                    onChange={(e) => {
+                      setAmountTouched(true);
+                      setAmountInput(e.target.value);
+                    }}
+                    className={`w-full rounded-lg border px-7 py-2 text-base font-semibold text-text-heading focus:outline-none focus:ring-2 focus:ring-focus-ring ${
+                      amountBelowTotal
+                        ? "border-accent-red focus:border-accent-red"
+                        : "border-border-strong focus:border-focus-border"
+                    }`}
+                  />
+                </div>
+                <div className="mt-1 text-xs">
+                  <span className="text-text-faint">
+                    Wage total: {formatCurrency(totalSelected)} ({idsArr.length} entries)
+                  </span>
+                  {extra > 0 && (
+                    <span className="ml-2 font-medium text-accent-amber">
+                      + Advance: {formatCurrency(extra)}
+                    </span>
+                  )}
+                </div>
+                {amountBelowTotal && (
+                  <p className="mt-1 text-xs text-accent-red">
+                    Amount must be at least {formatCurrency(totalSelected)}. To pay less, deselect some days.
+                  </p>
+                )}
+              </div>
+              <button
+                type="submit"
+                disabled={isPending || idsArr.length === 0 || !amountValid}
+                className="rounded-lg bg-primary px-6 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary-hover disabled:opacity-60"
+              >
+                {isPending ? "Recording..." : "Record Payment"}
+              </button>
             </div>
-            <button
-              type="submit"
-              disabled={isPending || idsArr.length === 0 || totalSelected <= 0}
-              className="rounded-lg bg-primary px-6 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary-hover disabled:opacity-60"
-            >
-              {isPending ? "Recording..." : "Record Payment"}
-            </button>
           </div>
         </form>
       )}

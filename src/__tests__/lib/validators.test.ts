@@ -542,43 +542,44 @@ describe("bulkAttendanceSchema", () => {
 });
 
 describe("wagePaymentSchema", () => {
+  const valid = {
+    contractorId: "1",
+    date: "2026-04-21",
+    attendanceIds: [1, 2, 3],
+    amount: "2000",
+    notes: "",
+  };
+
   test("accepts a valid payment with multiple attendance ids", () => {
-    const r = wagePaymentSchema.safeParse({
-      contractorId: "1",
-      date: "2026-04-21",
-      attendanceIds: [1, 2, 3],
-      notes: "",
-    });
+    const r = wagePaymentSchema.safeParse(valid);
     expect(r.success).toBe(true);
   });
 
   test("rejects empty attendance list", () => {
-    const r = wagePaymentSchema.safeParse({
-      contractorId: "1",
-      date: "2026-04-21",
-      attendanceIds: [],
-      notes: "",
-    });
+    const r = wagePaymentSchema.safeParse({ ...valid, attendanceIds: [] });
     expect(r.success).toBe(false);
   });
 
   test("rejects missing contractor", () => {
-    const r = wagePaymentSchema.safeParse({
-      contractorId: "0",
-      date: "2026-04-21",
-      attendanceIds: [1],
-      notes: "",
-    });
+    const r = wagePaymentSchema.safeParse({ ...valid, contractorId: "0" });
     expect(r.success).toBe(false);
   });
 
   test("rejects empty date", () => {
-    const r = wagePaymentSchema.safeParse({
-      contractorId: "1",
-      date: "",
-      attendanceIds: [1],
-      notes: "",
-    });
+    const r = wagePaymentSchema.safeParse({ ...valid, date: "" });
     expect(r.success).toBe(false);
+  });
+
+  test("rejects non-positive amount", () => {
+    const r1 = wagePaymentSchema.safeParse({ ...valid, amount: "0" });
+    const r2 = wagePaymentSchema.safeParse({ ...valid, amount: "-100" });
+    expect(r1.success).toBe(false);
+    expect(r2.success).toBe(false);
+  });
+
+  test("coerces string amount to number", () => {
+    const r = wagePaymentSchema.safeParse({ ...valid, amount: "2500" });
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data.amount).toBe(2500);
   });
 });
