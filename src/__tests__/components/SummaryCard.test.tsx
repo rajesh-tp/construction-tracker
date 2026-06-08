@@ -62,4 +62,20 @@ describe("SummaryCard", () => {
     );
     expect(container.firstChild).toHaveClass("bg-accent-amber-bg");
   });
+
+  test("renders as a static div by default (no href)", () => {
+    const { container } = render(
+      <SummaryCard title="Test" value="100" icon={defaultIcon} />
+    );
+    expect(container.firstChild?.nodeName).toBe("DIV");
+  });
+
+  test("renders as a link when href is provided", () => {
+    const { container } = render(
+      <SummaryCard title="Test" value="100" icon={defaultIcon} href="/workers/1/wages?status=paid" />
+    );
+    const root = container.firstChild as HTMLElement;
+    expect(root.nodeName).toBe("A");
+    expect(root.getAttribute("href")).toBe("/workers/1/wages?status=paid");
+  });
 });
