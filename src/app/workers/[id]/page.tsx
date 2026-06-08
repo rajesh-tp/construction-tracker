@@ -129,8 +129,9 @@ export default async function WorkerDetailPage({
         <SummaryCard
           title="Total Paid"
           value={formatCurrency(allTimeSummary.paidWage)}
-          subtitle={`of ${formatCurrency(allTimeSummary.totalWage)} earned`}
+          subtitle={`${allTimeSummary.daysWorked} day${allTimeSummary.daysWorked === 1 ? "" : "s"} worked · of ${formatCurrency(allTimeSummary.totalWage)} earned`}
           variant="green"
+          href={`/workers/${worker.id}/wages?status=paid`}
           icon={
             <svg className="h-5 w-5 text-accent-green" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -142,6 +143,7 @@ export default async function WorkerDetailPage({
           value={formatCurrency(allTimeSummary.unpaidWage)}
           subtitle="Unpaid wages"
           variant={allTimeSummary.unpaidWage > 0 ? "red" : "default"}
+          href={`/workers/${worker.id}/wages?status=unpaid`}
           icon={
             <svg className="h-5 w-5 text-accent-red" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />

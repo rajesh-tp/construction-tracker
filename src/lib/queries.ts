@@ -508,6 +508,7 @@ export async function getWorkerWageSummary(
   endDate: string
 ): Promise<{
   totalUnits: number;
+  daysWorked: number;
   totalWage: number;
   paidWage: number;
   unpaidWage: number;
@@ -515,17 +516,19 @@ export async function getWorkerWageSummary(
 }> {
   const days = await getAttendanceForWorkerInRange(workerId, startDate, endDate);
   let totalUnits = 0;
+  let daysWorked = 0;
   let totalWage = 0;
   let paidWage = 0;
   let unpaidWage = 0;
   for (const d of days) {
     const dayWage = d.units * d.wageSnapshot;
     totalUnits += d.units;
+    if (d.units > 0) daysWorked += 1;
     totalWage += dayWage;
     if (d.paymentTransactionId !== null) paidWage += dayWage;
     else unpaidWage += dayWage;
   }
-  return { totalUnits, totalWage, paidWage, unpaidWage, days };
+  return { totalUnits, daysWorked, totalWage, paidWage, unpaidWage, days };
 }
 
 // Unpaid attendance grouped by worker, scoped to a contractor + construction
