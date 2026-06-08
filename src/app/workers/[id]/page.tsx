@@ -79,6 +79,8 @@ export default async function WorkerDetailPage({
 
   // All-time wage payment history for this worker
   const paymentHistory = await getWagePaymentsForWorker(worker.id);
+  const totalAdvance = paymentHistory.reduce((sum, p) => sum + p.extraAmount, 0);
+  const advancePaymentCount = paymentHistory.filter((p) => p.extraAmount > 0).length;
   const allTimeStart = "1970-01-01";
   const allTimeEnd = "2999-12-31";
   const allTimeSummary = await getWorkerWageSummary(worker.id, allTimeStart, allTimeEnd);
@@ -150,6 +152,27 @@ export default async function WorkerDetailPage({
             </svg>
           }
         />
+      </div>
+
+      <div className="rounded-xl border border-accent-amber/30 bg-accent-amber-bg/40 p-5 shadow-sm">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-medium text-text-muted">Total Advance</h2>
+            <p className="mt-1 text-2xl font-bold text-text-heading">
+              {formatCurrency(totalAdvance)}
+            </p>
+            <p className="mt-0.5 text-xs text-text-faint">
+              {totalAdvance > 0
+                ? `Across ${advancePaymentCount} payment${advancePaymentCount === 1 ? "" : "s"} that included this worker. Paid to the contractor at the payment level.`
+                : "No advances recorded for payments involving this worker."}
+            </p>
+          </div>
+          <div className="rounded-lg bg-surface p-2 shadow-sm">
+            <svg className="h-5 w-5 text-accent-amber" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+        </div>
       </div>
 
       <div className="rounded-xl border border-border bg-surface p-5 shadow-sm">
