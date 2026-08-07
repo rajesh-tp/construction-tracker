@@ -41,6 +41,7 @@ function monthRange(month: string): { from: string; to: string } {
 
 const CATEGORY_COLORS: Record<string, string> = {
   "Material Purchase": "bg-blue-500",
+  "Electrical & Plumbing Material": "bg-teal-500",
   "Labour Payment": "bg-amber-500",
   "Contractor Payment": "bg-purple-500",
   "Transport": "bg-green-500",
