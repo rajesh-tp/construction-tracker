@@ -21,19 +21,21 @@ describe("Validator Constants", () => {
     expect(CONTRACTOR_TYPES).toContain("Building Contractor");
     expect(CONTRACTOR_TYPES).toContain("Electrical Contractor");
     expect(CONTRACTOR_TYPES).toContain("Plumbing Contractor");
+    expect(CONTRACTOR_TYPES).toContain("Electrical cum Plumbing Contractor");
     expect(CONTRACTOR_TYPES).toContain("Architect");
     expect(CONTRACTOR_TYPES).toContain("Flooring Contractor");
     expect(CONTRACTOR_TYPES).toContain("Other");
-    expect(CONTRACTOR_TYPES.length).toBe(10);
+    expect(CONTRACTOR_TYPES.length).toBe(11);
   });
 
   test("TRANSACTION_CATEGORIES contains expected categories", () => {
     expect(TRANSACTION_CATEGORIES).toContain("Material Purchase");
+    expect(TRANSACTION_CATEGORIES).toContain("Electrical & Plumbing Material");
     expect(TRANSACTION_CATEGORIES).toContain("Labour Payment");
     expect(TRANSACTION_CATEGORIES).toContain("Contractor Payment");
     expect(TRANSACTION_CATEGORIES).toContain("Earth Work");
     expect(TRANSACTION_CATEGORIES).toContain("Miscellaneous");
-    expect(TRANSACTION_CATEGORIES.length).toBe(9);
+    expect(TRANSACTION_CATEGORIES.length).toBe(10);
   });
 
   test("TRANSACTION_TYPES contains expense, payment, adjustment", () => {

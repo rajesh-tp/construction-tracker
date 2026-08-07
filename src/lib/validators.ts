@@ -4,6 +4,7 @@ export const CONTRACTOR_TYPES = [
   "Building Contractor",
   "Electrical Contractor",
   "Plumbing Contractor",
+  "Electrical cum Plumbing Contractor",
   "Painting Contractor",
   "Flooring Contractor",
   "Interior Contractor",
@@ -15,6 +16,7 @@ export const CONTRACTOR_TYPES = [
 
 export const TRANSACTION_CATEGORIES = [
   "Material Purchase",
+  "Electrical & Plumbing Material",
   "Labour Payment",
   "Contractor Payment",
   "Earth Work",
